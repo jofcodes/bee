@@ -1,11 +1,12 @@
-"""Vision-based clip analysis using the Llama API.
+"""Vision-based clip analysis using Ollama with LLaVA.
 
-Instead of relying on blob anomaly detection, this sends sampled frames
-from each clip to a vision-capable Llama model and asks it to identify
-what animals/insects are present. Only clips with non-bee content are flagged.
+Sends sampled frames from each clip to a local vision model and asks it to
+identify what animals/insects are present. Only clips with non-bee content
+are flagged.
 
-Uses the Llama API (api.llama.com) which supports OpenAI-compatible chat
-completions with image inputs.
+Requires Ollama running locally with a vision model pulled:
+    brew install ollama
+    ollama pull llava
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -139,8 +140,8 @@ def analyze_clip_vision(
     vision_cfg: VisionConfig,
     client=None,
 ) -> VisionResult:
-    """Analyze a clip by sending sampled frames to the Llama Vision API."""
-    from openai import OpenAI
+    """Analyze a clip by sending a sampled frame to Ollama/LLaVA."""
+    import ollama as ollama_lib
 
     timestamp = datetime.fromtimestamp(clip_path.stat().st_mtime)
 
@@ -161,32 +162,18 @@ def analyze_clip_vision(
     frame = frames[len(frames) // 2]
     b64 = _encode_frame(frame)
 
-    if client is None:
-        client = OpenAI(
-            base_url="https://api.llama.com/compat/v1/",
-            api_key=vision_cfg.api_key,
-        )
-
     try:
-        response = client.chat.completions.create(
+        response = ollama_lib.chat(
             model=vision_cfg.model,
             messages=[
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": ANALYSIS_PROMPT},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{b64}",
-                            },
-                        },
-                    ],
+                    "content": ANALYSIS_PROMPT,
+                    "images": [b64],
                 }
             ],
-            max_tokens=300,
         )
-        text = response.choices[0].message.content
+        text = response["message"]["content"]
         parsed = _parse_response(text)
 
         result = VisionResult(
@@ -208,7 +195,7 @@ def analyze_clip_vision(
         return result
 
     except Exception as exc:
-        log.error("Vision API error for %s: %s", clip_path.name, exc)
+        log.error("Vision error for %s: %s", clip_path.name, exc)
         return VisionResult(
             clip_path=clip_path,
             timestamp=timestamp,

@@ -41,8 +41,7 @@ class OutlierConfig:
 @dataclass
 class VisionConfig:
     enabled: bool = True
-    model: str = "Llama-4-Maverick-17B-128E-Instruct-FP8"
-    api_key: str = ""
+    model: str = "llava"
     max_clips: int = 0
 
 

@@ -56,9 +56,8 @@ vision:
   # Set to false to skip vision analysis entirely (blob analysis only).
   enabled: true
 
-  # Llama API model. Requires an API key from llama.developer.meta.com
-  model: "Llama-4-Scout-17B-16E-Instruct-FP8"
-  api_key: ""   # Set via LLAMA_API_KEY env var or paste here
+  # Ollama model name. Install: brew install ollama && ollama pull llava
+  model: "llava"
 
   # Max clips to analyze per run (0 = no limit).
   max_clips: 0

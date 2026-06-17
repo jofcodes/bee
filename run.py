@@ -35,35 +35,33 @@ def find_clips(folder: Path) -> list[Path]:
 
 
 def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
-    """Vision-first pipeline: send frames to Llama Vision, flag non-bee content."""
-    from openai import OpenAI
-
-    api_key = cfg.vision.api_key or os.environ.get("LLAMA_API_KEY", "")
-    if not api_key:
-        print("No Llama API key found.")
-        print("Get a free key at https://llama.developer.meta.com → Dashboard → API Keys")
-        api_key = input("  Paste your Llama API key: ").strip()
-        if not api_key:
-            log.error("No API key provided.")
-            sys.exit(1)
-    cfg.vision.api_key = api_key
-
-    client = OpenAI(
-        base_url="https://api.llama.com/compat/v1/",
-        api_key=api_key,
-    )
+    """Vision-first pipeline: send frames to Ollama/LLaVA, flag non-bee content."""
+    # Check Ollama is available
+    try:
+        import ollama as ollama_lib
+        ollama_lib.list()
+    except Exception as exc:
+        log.error(
+            "Cannot connect to Ollama: %s\n"
+            "Make sure Ollama is installed and running:\n"
+            "  brew install ollama\n"
+            "  ollama serve   (in another terminal)\n"
+            "  ollama pull llava",
+            exc,
+        )
+        sys.exit(1)
 
     max_clips = cfg.vision.max_clips or len(clips)
     clips = clips[:max_clips]
 
-    log.info("Analyzing %d clips with Llama Vision (%s)…", len(clips), cfg.vision.model)
+    log.info("Analyzing %d clips with Ollama/%s…", len(clips), cfg.vision.model)
 
     results: list[VisionResult] = []
     flagged: list[VisionResult] = []
 
     for i, clip_path in enumerate(clips, 1):
         log.info("[%d/%d] %s", i, len(clips), clip_path.name)
-        result = analyze_clip_vision(clip_path, cfg.vision, client)
+        result = analyze_clip_vision(clip_path, cfg.vision)
         results.append(result)
         if result.has_non_bee_content:
             flagged.append(result)
