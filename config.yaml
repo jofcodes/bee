@@ -1,0 +1,78 @@
+# ── Level 1: Blob analysis thresholds ──────────────────────────────────
+
+blob:
+  # Minimum contour area (pixels²) to consider a blob.
+  # Filters sensor noise. Blink 1080p: a bee ≈ 300–1200 px².
+  min_area: 100
+
+  # Morphology kernel size for cleaning the foreground mask.
+  morph_kernel: 5
+
+background:
+  # MOG2 history length (frames). Shorter = adapts faster to static scene.
+  history: 200
+  # MOG2 variance threshold.
+  var_threshold: 40
+  # Frames to skip at clip start while MOG2 warms up.
+  warmup_frames: 10
+
+tracker:
+  # Max pixel distance between centroids to match across frames.
+  max_distance: 60
+  # Frames a track can be missing before it's finalized.
+  max_gap: 3
+
+# ── Outlier detection ──────────────────────────────────────────────────
+
+outlier:
+  # z-score threshold (relative to time-bucket median/IQR).
+  z_threshold: 2.5
+
+  # Anomaly must persist across at least this many frames to be flagged.
+  min_persistence_frames: 5
+
+  # Group clips into N-hour buckets for per-time-of-day modeling.
+  time_bucket_hours: 2
+
+  # Need at least N clips in a bucket to compute reliable statistics.
+  # Below this, only absolute thresholds are used.
+  min_clips_for_stats: 5
+
+  # ── Absolute thresholds (used when not enough data for statistics) ──
+  # Blob area above this is always suspicious (likely larger than a bee).
+  abs_max_blob_area: 5000
+  # Blob dwelling (frames in roughly the same spot) above this is suspicious.
+  abs_max_dwell_frames: 45    # ~1.5s at 30 fps
+  # Blob area ratio: flag if largest blob > N× the clip's median blob.
+  large_blob_ratio: 3.0
+
+# ── Level 2: Vision-model confirmation ─────────────────────────────────
+
+vision:
+  # Set to false to skip Level 2 entirely (Level 1 only).
+  enabled: true
+
+  # Ollama model name. Ensure it's pulled: `ollama pull llava:13b`
+  model: "llava:13b"
+  # Ollama server address.
+  host: "http://localhost:11434"
+
+  # Max crops to send per flagged clip (keeps cost/time down).
+  max_crops_per_clip: 5
+
+  # Prompt sent with each crop.
+  prompt: >
+    This image is a crop from a beehive entrance camera.
+    Is there anything other than normal honeybee activity visible?
+    Look specifically for: wasps, hornets, yellow jackets, robbing behavior
+    (many bees fighting at the entrance), predators (birds, mice, bears),
+    or any unusual objects.
+    Reply with a JSON object: {"anomaly": true/false, "description": "...", "confidence": "high/medium/low"}
+
+# ── Report ─────────────────────────────────────────────────────────────
+
+report:
+  # Max thumbnail width for the HTML report.
+  thumbnail_width: 400
+  # Maximum flagged events to include in the report.
+  max_events: 200
