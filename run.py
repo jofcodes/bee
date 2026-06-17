@@ -36,18 +36,19 @@ def find_clips(folder: Path) -> list[Path]:
 
 def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
     """Vision-first pipeline: send frames to Ollama/LLaVA, flag non-bee content."""
-    # Check Ollama is available
+    # Check Ollama is available on localhost
     try:
         import ollama as ollama_lib
-        ollama_lib.list()
+        ollama_client = ollama_lib.Client(host=cfg.vision.host)
+        ollama_client.list()
     except Exception as exc:
         log.error(
-            "Cannot connect to Ollama: %s\n"
+            "Cannot connect to Ollama at %s: %s\n"
             "Make sure Ollama is installed and running:\n"
-            "  brew install ollama\n"
-            "  ollama serve   (in another terminal)\n"
-            "  ollama pull llava",
-            exc,
+            "  1. Install from https://ollama.com/download\n"
+            "  2. Open Ollama from Applications\n"
+            "  3. Run: ollama pull llama3.2-vision",
+            cfg.vision.host, exc,
         )
         sys.exit(1)
 

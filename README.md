@@ -29,8 +29,9 @@ pip install -r requirements.txt
 ### 2. Install Ollama + LLaVA (for vision detection)
 
 ```bash
-brew install ollama
-ollama pull llava
+# Download from https://ollama.com/download and install the macOS app
+# Then pull Meta's Llama 3.2 Vision model:
+ollama pull llama3.2-vision
 ```
 
 Make sure Ollama is running (`ollama serve` in another terminal, or it auto-starts on macOS).
@@ -84,7 +85,7 @@ All thresholds are in `config.yaml`. Key settings:
 
 | Setting | Default | What it controls |
 |---------|---------|-----------------|
-| `vision.model` | llava | Ollama vision model |
+| `vision.model` | llama3.2-vision | Ollama vision model (Meta-approved) |
 | `vision.max_clips` | 0 (all) | Limit clips per run |
 | `outlier.z_threshold` | 5.0 | Statistical outlier sensitivity |
 | `outlier.abs_max_blob_area` | 80000 px² | Absolute "too big" threshold |

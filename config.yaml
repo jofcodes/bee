@@ -56,8 +56,13 @@ vision:
   # Set to false to skip vision analysis entirely (blob analysis only).
   enabled: true
 
-  # Ollama model name. Install: brew install ollama && ollama pull llava
-  model: "llava"
+  # Ollama model. Use Meta's Llama 3.2 Vision (Meta-approved).
+  # Install: brew install ollama && ollama pull llama3.2-vision
+  # Do NOT use third-party models with unclear licensing.
+  model: "llama3.2-vision"
+
+  # Ollama host — keep bound to localhost only.
+  host: "http://127.0.0.1:11434"
 
   # Max clips to analyze per run (0 = no limit).
   max_clips: 0

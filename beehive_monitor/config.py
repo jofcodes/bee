@@ -41,7 +41,8 @@ class OutlierConfig:
 @dataclass
 class VisionConfig:
     enabled: bool = True
-    model: str = "llava"
+    model: str = "llama3.2-vision"
+    host: str = "http://127.0.0.1:11434"
     max_clips: int = 0
 
 

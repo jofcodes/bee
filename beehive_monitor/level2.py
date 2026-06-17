@@ -1,12 +1,17 @@
-"""Vision-based clip analysis using Ollama with LLaVA.
+"""Vision-based clip analysis using Ollama with Llama 3.2 Vision.
 
-Sends sampled frames from each clip to a local vision model and asks it to
-identify what animals/insects are present. Only clips with non-bee content
-are flagged.
+Sends sampled frames from each clip to Meta's Llama 3.2 Vision model
+running locally via Ollama, and asks it to identify what animals/insects
+are present. Only clips with non-bee content are flagged.
 
-Requires Ollama running locally with a vision model pulled:
-    brew install ollama
-    ollama pull llava
+Policy notes:
+  - Uses Meta's own Llama 3.2 Vision model only (Meta-approved).
+  - Ollama is bound to localhost (127.0.0.1) — not exposed on the network.
+  - Only personal beehive footage is processed — no Meta internal data.
+
+Requires Ollama running locally:
+    # Install from https://ollama.com/download (macOS app)
+    ollama pull llama3.2-vision
 """
 
 from __future__ import annotations
@@ -140,7 +145,7 @@ def analyze_clip_vision(
     vision_cfg: VisionConfig,
     client=None,
 ) -> VisionResult:
-    """Analyze a clip by sending a sampled frame to Ollama/LLaVA."""
+    """Analyze a clip by sending a sampled frame to Ollama/Llama 3.2 Vision."""
     import ollama as ollama_lib
 
     timestamp = datetime.fromtimestamp(clip_path.stat().st_mtime)
@@ -163,7 +168,9 @@ def analyze_clip_vision(
     b64 = _encode_frame(frame)
 
     try:
-        response = ollama_lib.chat(
+        # Connect to Ollama on localhost only (not exposed to network)
+        ollama_client = ollama_lib.Client(host=vision_cfg.host)
+        response = ollama_client.chat(
             model=vision_cfg.model,
             messages=[
                 {
