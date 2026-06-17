@@ -410,6 +410,25 @@ def detect_anomalies(
             if not reasons:
                 continue
 
+            # ── Require multiple anomaly signals to co-occur ──
+            # A single signal (e.g., blob area alone) is too noisy.
+            # Only flag when at least 2 different anomaly categories agree.
+            categories = set()
+            for r in reasons:
+                if "blob area" in r.lower() or "large blob" in r.lower():
+                    categories.add("size")
+                elif "size ratio" in r.lower() or "size outlier" in r.lower():
+                    categories.add("size")
+                elif "dwell" in r.lower():
+                    categories.add("behavior")
+                elif "linearity" in r.lower() or "trajectory" in r.lower():
+                    categories.add("behavior")
+                else:
+                    categories.add("other")
+
+            if len(categories) < 2:
+                continue
+
             analysis.flagged = True
             analysis.anomaly_reasons = reasons
 
@@ -489,3 +508,36 @@ def extract_crops(
 
     cap.release()
     return crops
+
+
+def extract_context_frame(event: FlaggedEvent) -> np.ndarray | None:
+    """Extract a full frame from the clip with the anomalous blob highlighted."""
+    if not event.frame_indices or event.track is None:
+        return None
+
+    # Pick the middle frame of the track
+    mid_idx = event.frame_indices[len(event.frame_indices) // 2]
+
+    cap = cv2.VideoCapture(str(event.clip_path))
+    if not cap.isOpened():
+        return None
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, mid_idx)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return None
+
+    # Find the blob at this frame and draw a bounding box
+    for blob in event.track.blobs:
+        if blob.frame_idx == mid_idx:
+            x, y, w, h = blob.bbox
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
+            label = f"{blob.area:.0f}px"
+            cv2.putText(
+                frame, label, (x, y - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2,
+            )
+            break
+
+    return frame

@@ -41,18 +41,9 @@ class OutlierConfig:
 @dataclass
 class VisionConfig:
     enabled: bool = True
-    model: str = "llava:13b"
-    host: str = "http://localhost:11434"
-    max_crops_per_clip: int = 5
-    prompt: str = (
-        "This image is a crop from a beehive entrance camera. "
-        "Is there anything other than normal honeybee activity visible? "
-        "Look specifically for: wasps, hornets, yellow jackets, robbing behavior "
-        "(many bees fighting at the entrance), predators (birds, mice, bears), "
-        "or any unusual objects. "
-        'Reply with a JSON object: {"anomaly": true/false, "description": "...", '
-        '"confidence": "high/medium/low"}'
-    )
+    model: str = "Llama-4-Maverick-17B-128E-Instruct-FP8"
+    api_key: str = ""
+    max_clips: int = 0
 
 
 @dataclass

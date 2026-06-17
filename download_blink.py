@@ -36,8 +36,31 @@ log = logging.getLogger("blink_download")
 CREDS_FILE = Path(".blink_token.json")
 
 
+def _fix_ssl_certificates() -> None:
+    """Fix macOS SSL certificate issue — Python often can't find root CAs."""
+    try:
+        import certifi
+        import ssl
+
+        ssl._create_default_https_context = lambda: ssl.create_default_context(
+            cafile=certifi.where()
+        )
+        # Also set env var for aiohttp/other libs
+        import os
+
+        os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        log.debug("Set SSL certificates from certifi: %s", certifi.where())
+    except ImportError:
+        log.warning(
+            "certifi not installed — SSL may fail. "
+            "Fix with: pip install certifi"
+        )
+
+
 def _apply_auth_workarounds() -> None:
     """Monkey-patch blinkpy to work around known auth bugs."""
+
+    _fix_ssl_certificates()
 
     # --- Workaround for #1217: cookie loss during 2FA ---
     # aiohttp's default CookieJar drops cookies between the OAuth login
@@ -106,25 +129,31 @@ async def download_clips(
             log.warning("Could not load saved token, will re-authenticate")
 
     log.info("Connecting to Blink…")
+    start_ok = False
     try:
         await blink.start()
+        start_ok = True
     except Exception as exc:
-        log.error("Login failed: %s", exc)
-        log.error(
-            "If you're seeing auth errors, Blink may have changed their API again.\n"
-            "Check https://github.com/fronzbot/blinkpy/issues for updates.\n"
-            "Fallback: pull clips via USB from your Sync Module 2."
-        )
-        sys.exit(1)
+        # blinkpy often raises on 2FA required — not necessarily fatal.
+        log.info("Login raised: %s", exc or "(2FA trigger)")
 
-    # Handle 2FA if needed
-    if blink.key_required:
-        log.info("2FA required — check your email/phone for a PIN.")
-        pin = input("Enter 2FA PIN: ").strip()
+    # Detect incomplete auth: if blink.urls is None, login didn't finish
+    # This catches both explicit key_required AND silent failures
+    needs_2fa = getattr(blink, "key_required", False) or blink.urls is None
+    if needs_2fa and not start_ok:
+        log.info("2FA required — Blink should have sent a PIN to your email/phone.")
+        pin = input("  Enter 2FA PIN: ").strip()
         try:
-            result = await auth.send_auth_key(blink, pin)
+            result = await auth.complete_2fa_login(pin)
             log.info("2FA result: %s", result)
-            await blink.setup_post_verify()
+            if result:
+                # Re-run start() now that auth is complete — this time it
+                # won't need 2FA and will set up blink.urls, cameras, etc.
+                log.info("2FA succeeded — completing Blink setup…")
+                await blink.start()
+            else:
+                log.error("2FA returned False — PIN may have expired.")
+                sys.exit(1)
         except Exception as exc:
             log.error("2FA verification failed: %s", exc)
             log.error(
@@ -132,6 +161,14 @@ async def download_clips(
                 "Try updating blinkpy or use USB pull."
             )
             sys.exit(1)
+
+    # Verify auth completed
+    if blink.urls is None:
+        log.error(
+            "Authentication did not complete — blink.urls is still None.\n"
+            "This is a known blinkpy issue. Fallback: pull clips via USB."
+        )
+        sys.exit(1)
 
     # Save session token to avoid 2FA next time
     if auth.token:
@@ -193,8 +230,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    email = args.email or input("Blink email: ").strip()
-    password = getpass.getpass("Blink password: ")
+    email = args.email
+    if not email:
+        print("Enter your Blink credentials (password will be hidden):")
+        email = input("  Email: ").strip()
+    password = getpass.getpass("  Password: ")
 
     count = asyncio.run(download_clips(email, password, args.output, args.days))
 

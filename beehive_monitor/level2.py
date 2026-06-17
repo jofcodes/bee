@@ -1,7 +1,11 @@
-"""Level 2 — vision-model confirmation via Ollama (LLaVA).
+"""Vision-based clip analysis using the Llama API.
 
-For each flagged event from Level 1, send the crop(s) to a local
-vision model and ask whether it sees anything other than honeybees.
+Instead of relying on blob anomaly detection, this sends sampled frames
+from each clip to a vision-capable Llama model and asks it to identify
+what animals/insects are present. Only clips with non-bee content are flagged.
+
+Uses the Llama API (api.llama.com) which supports OpenAI-compatible chat
+completions with image inputs.
 """
 
 from __future__ import annotations
@@ -9,99 +13,209 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from io import BytesIO
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from .config import VisionConfig
-from .models import FlaggedEvent
 
 log = logging.getLogger(__name__)
 
+ANALYSIS_PROMPT = """\
+You are analyzing a frame from a beehive entrance camera. Your job is to identify \
+what is visible in the image.
 
-def _encode_crop(crop: np.ndarray) -> str:
-    """Encode a BGR numpy array to a base64 JPEG string."""
-    _, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+Look carefully for:
+1. Honeybees (normal — the expected residents)
+2. Wasps or hornets (yellow jackets, paper wasps, Asian giant hornets, etc.)
+3. Other predators (birds, mice, rats, lizards, spiders, ants, beetles)
+4. Robbing behavior (many bees fighting/wrestling at the entrance)
+5. Swarm activity (large dense cluster of bees)
+6. Any other unusual animals, insects, or objects
+
+Respond with ONLY a JSON object (no other text):
+{
+  "has_non_bee_content": true/false,
+  "animals_seen": ["list of animals/insects identified"],
+  "description": "brief description of what you see",
+  "confidence": "high/medium/low",
+  "threat_level": "none/low/medium/high"
+}
+
+If you only see normal honeybees coming and going, set has_non_bee_content to false.\
+"""
+
+
+@dataclass
+class VisionResult:
+    """Result of vision analysis for a single clip."""
+
+    clip_path: Path
+    timestamp: datetime
+    has_non_bee_content: bool
+    animals_seen: list[str]
+    description: str
+    confidence: str
+    threat_level: str
+    frame_path: Path | None = None
+    raw_response: str = ""
+    error: str = ""
+
+
+def _encode_frame(frame: np.ndarray) -> str:
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def _parse_response(text: str) -> tuple[bool | None, str]:
-    """Try to extract structured answer from model response."""
-    # Try JSON parse first
-    for line in text.splitlines():
+def _extract_frames(clip_path: Path, n_frames: int = 3) -> list[np.ndarray]:
+    """Extract n evenly-spaced frames from a clip."""
+    cap = cv2.VideoCapture(str(clip_path))
+    if not cap.isOpened():
+        return []
+
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total <= 0:
+        cap.release()
+        return []
+
+    # Skip first and last 10% (often blank/transitional)
+    start = max(0, int(total * 0.1))
+    end = max(start + 1, int(total * 0.9))
+    indices = np.linspace(start, end, n_frames, dtype=int)
+
+    frames = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+        ret, frame = cap.read()
+        if ret:
+            frames.append(frame)
+
+    cap.release()
+    return frames
+
+
+def _parse_response(text: str) -> dict:
+    """Extract JSON from model response."""
+    # Try direct JSON parse
+    for line in text.strip().splitlines():
         line = line.strip()
         if line.startswith("{"):
             try:
-                obj = json.loads(line)
-                anomaly = obj.get("anomaly")
-                desc = obj.get("description", "")
-                return anomaly, desc
+                return json.loads(line)
             except json.JSONDecodeError:
                 pass
 
-    # Fallback: keyword search
+    # Try finding JSON block in the text
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end])
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: keyword detection
     lower = text.lower()
-    if any(w in lower for w in ("wasp", "hornet", "yellow jacket", "predator", "robbing", "unusual")):
-        return True, text.strip()
-    if "no" in lower and "anomal" in lower:
-        return False, text.strip()
-    if "normal" in lower and "honeybee" in lower:
-        return False, text.strip()
+    has_threat = any(
+        w in lower
+        for w in ("wasp", "hornet", "yellow jacket", "predator", "rat",
+                   "mouse", "bird", "spider", "ant ", "beetle", "robbing",
+                   "unusual", "threat")
+    )
+    return {
+        "has_non_bee_content": has_threat,
+        "animals_seen": [],
+        "description": text.strip()[:200],
+        "confidence": "low",
+        "threat_level": "unknown",
+    }
 
-    # Ambiguous — return the text but don't confirm
-    return None, text.strip()
 
-
-def confirm_event(
-    event: FlaggedEvent,
-    crops: list[np.ndarray],
+def analyze_clip_vision(
+    clip_path: Path,
     vision_cfg: VisionConfig,
-) -> None:
-    """Send crops to Ollama/LLaVA and update the event with the response.
+    client=None,
+) -> VisionResult:
+    """Analyze a clip by sending sampled frames to the Llama Vision API."""
+    from openai import OpenAI
 
-    Modifies event in place: sets level2_response and level2_confirmed.
-    """
-    try:
-        import ollama
-    except ImportError:
-        log.warning(
-            "ollama package not installed — skipping Level 2. "
-            "Install with: pip install ollama"
+    timestamp = datetime.fromtimestamp(clip_path.stat().st_mtime)
+
+    frames = _extract_frames(clip_path, n_frames=3)
+    if not frames:
+        return VisionResult(
+            clip_path=clip_path,
+            timestamp=timestamp,
+            has_non_bee_content=False,
+            animals_seen=[],
+            description="Could not extract frames",
+            confidence="none",
+            threat_level="none",
+            error="No frames extracted",
         )
-        event.level2_response = "SKIPPED: ollama not installed"
-        return
 
-    if not crops:
-        event.level2_response = "No crops available"
-        return
+    # Use the middle frame for analysis (best chance of showing action)
+    frame = frames[len(frames) // 2]
+    b64 = _encode_frame(frame)
 
-    # Use the best (largest) crop
-    best_crop = max(crops, key=lambda c: c.shape[0] * c.shape[1])
-    b64 = _encode_crop(best_crop)
+    if client is None:
+        client = OpenAI(
+            base_url="https://api.llama.com/compat/v1/",
+            api_key=vision_cfg.api_key,
+        )
 
     try:
-        client = ollama.Client(host=vision_cfg.host)
-        response = client.chat(
+        response = client.chat.completions.create(
             model=vision_cfg.model,
             messages=[
                 {
                     "role": "user",
-                    "content": vision_cfg.prompt,
-                    "images": [b64],
+                    "content": [
+                        {"type": "text", "text": ANALYSIS_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{b64}",
+                            },
+                        },
+                    ],
                 }
             ],
+            max_tokens=300,
         )
-        text = response["message"]["content"]
-        confirmed, description = _parse_response(text)
-        event.level2_confirmed = confirmed
-        event.level2_response = description
+        text = response.choices[0].message.content
+        parsed = _parse_response(text)
+
+        result = VisionResult(
+            clip_path=clip_path,
+            timestamp=timestamp,
+            has_non_bee_content=parsed.get("has_non_bee_content", False),
+            animals_seen=parsed.get("animals_seen", []),
+            description=parsed.get("description", ""),
+            confidence=parsed.get("confidence", "unknown"),
+            threat_level=parsed.get("threat_level", "none"),
+            raw_response=text,
+        )
         log.info(
-            "Level 2 for %s: confirmed=%s — %s",
-            event.clip_path.name,
-            confirmed,
-            description[:100],
+            "  %s → %s | %s",
+            clip_path.name,
+            "FLAGGED" if result.has_non_bee_content else "normal",
+            result.description[:80],
         )
+        return result
+
     except Exception as exc:
-        log.error("Ollama call failed: %s", exc)
-        event.level2_response = f"ERROR: {exc}"
+        log.error("Vision API error for %s: %s", clip_path.name, exc)
+        return VisionResult(
+            clip_path=clip_path,
+            timestamp=timestamp,
+            has_non_bee_content=False,
+            animals_seen=[],
+            description="",
+            confidence="none",
+            threat_level="none",
+            error=str(exc),
+        )

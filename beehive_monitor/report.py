@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -78,9 +79,11 @@ def write_json_digest(
 def write_html_report(
     events: list[FlaggedEvent],
     crops_map: dict[int, list[np.ndarray]],
+    context_frames: dict[int, np.ndarray | None],
     total_clips: int,
     output_dir: Path,
     report_cfg: ReportConfig,
+    clips_dir: Path | None = None,
 ) -> Path:
     """Write a standalone HTML report with embedded thumbnails."""
     parts: list[str] = []
@@ -100,6 +103,10 @@ def write_html_report(
   .l2.alert {{ background: #ffebee; }}
   .thumbs {{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 0.5em; }}
   .thumbs img {{ border-radius: 4px; border: 1px solid #ccc; }}
+  .context {{ margin-top: 0.5em; margin-bottom: 0.5em; }}
+  .context img {{ max-width: 100%; border-radius: 8px; border: 2px solid #b8860b; }}
+  .clip-video {{ margin-top: 0.5em; }}
+  .clip-video video {{ max-width: 100%; border-radius: 8px; border: 1px solid #ccc; }}
   small {{ color: #666; }}
 </style></head><body>
 <h1>&#x1f41d; Beehive Monitor — Anomaly Report</h1>
@@ -135,6 +142,30 @@ def write_html_report(
             parts.append(
                 f'<div class="l2 {alert}"><strong>Vision model ({label}):</strong> '
                 f"{escape(event.level2_response)}</div>"
+            )
+
+        # Video player for the clip
+        clip_path = event.clip_path
+        if clips_dir and clip_path.exists():
+            # Use relative path from report to clip
+            try:
+                rel = os.path.relpath(clip_path, output_dir)
+            except ValueError:
+                rel = str(clip_path)
+            parts.append(
+                f'<div class="clip-video">'
+                f'<video controls loop muted preload="metadata" width="100%">'
+                f'<source src="{escape(rel)}" type="video/mp4">'
+                f'</video></div>'
+            )
+
+        # Context frame (full view with highlighted blob)
+        ctx = context_frames.get(i)
+        if ctx is not None:
+            b64_ctx = _thumb_b64(ctx, 800)
+            parts.append(
+                f'<div class="context"><img src="data:image/jpeg;base64,{b64_ctx}" '
+                f'alt="full frame with highlighted anomaly"></div>'
             )
 
         # Thumbnails

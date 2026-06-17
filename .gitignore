@@ -5,3 +5,4 @@ results/
 blink_clips/
 .blink_token.json
 *.egg-info/
+.env

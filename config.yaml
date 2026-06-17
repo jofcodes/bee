@@ -26,7 +26,8 @@ tracker:
 
 outlier:
   # z-score threshold (relative to time-bucket median/IQR).
-  z_threshold: 2.5
+  # Higher = fewer flags. 2.5 was too noisy; 5.0 flags only extreme outliers.
+  z_threshold: 5.0
 
   # Anomaly must persist across at least this many frames to be flagged.
   min_persistence_frames: 5
@@ -40,34 +41,27 @@ outlier:
 
   # ── Absolute thresholds (used when not enough data for statistics) ──
   # Blob area above this is always suspicious (likely larger than a bee).
-  abs_max_blob_area: 5000
+  # Blink 1080p: a close-up bee can be 30,000–40,000 px².
+  # A rat/bird/large wasp would be 80,000+ px².
+  abs_max_blob_area: 80000
   # Blob dwelling (frames in roughly the same spot) above this is suspicious.
-  abs_max_dwell_frames: 45    # ~1.5s at 30 fps
+  abs_max_dwell_frames: 90     # ~3s at 30 fps
   # Blob area ratio: flag if largest blob > N× the clip's median blob.
-  large_blob_ratio: 3.0
+  # Bees vary 10–100× due to distance from camera. Use a high ratio.
+  large_blob_ratio: 200.0
 
-# ── Level 2: Vision-model confirmation ─────────────────────────────────
+# ── Vision model (primary detector) ────────────────────────────────────
 
 vision:
-  # Set to false to skip Level 2 entirely (Level 1 only).
+  # Set to false to skip vision analysis entirely (blob analysis only).
   enabled: true
 
-  # Ollama model name. Ensure it's pulled: `ollama pull llava:13b`
-  model: "llava:13b"
-  # Ollama server address.
-  host: "http://localhost:11434"
+  # Llama API model. Requires an API key from llama.developer.meta.com
+  model: "Llama-4-Scout-17B-16E-Instruct-FP8"
+  api_key: ""   # Set via LLAMA_API_KEY env var or paste here
 
-  # Max crops to send per flagged clip (keeps cost/time down).
-  max_crops_per_clip: 5
-
-  # Prompt sent with each crop.
-  prompt: >
-    This image is a crop from a beehive entrance camera.
-    Is there anything other than normal honeybee activity visible?
-    Look specifically for: wasps, hornets, yellow jackets, robbing behavior
-    (many bees fighting at the entrance), predators (birds, mice, bears),
-    or any unusual objects.
-    Reply with a JSON object: {"anomaly": true/false, "description": "...", "confidence": "high/medium/low"}
+  # Max clips to analyze per run (0 = no limit).
+  max_clips: 0
 
 # ── Report ─────────────────────────────────────────────────────────────
 

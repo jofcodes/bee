@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-"""Beehive Monitor — batch anomaly detection for beehive camera footage.
+"""Beehive Monitor — detect interesting events in beehive camera footage.
 
 Usage:
-    python run.py /path/to/clips                           # defaults
+    python run.py /path/to/clips                           # vision-first (default)
+    python run.py /path/to/clips --level 1                 # blob analysis only
     python run.py /path/to/clips -o results/ -c config.yaml
-    python run.py /path/to/clips --level 1                 # skip vision model
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
 from beehive_monitor.config import load_config
-from beehive_monitor.level1 import analyze_clip, detect_anomalies, extract_crops
-from beehive_monitor.level2 import confirm_event
+from beehive_monitor.level1 import analyze_clip, detect_anomalies, extract_crops, extract_context_frame
+from beehive_monitor.level2 import analyze_clip_vision, VisionResult
 from beehive_monitor.report import save_crops, write_html_report, write_json_digest
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
@@ -30,63 +31,132 @@ log = logging.getLogger("beehive")
 
 
 def find_clips(folder: Path) -> list[Path]:
-    clips = sorted(
-        p for p in folder.rglob("*") if p.suffix.lower() in VIDEO_EXTS
-    )
-    return clips
+    return sorted(p for p in folder.rglob("*") if p.suffix.lower() in VIDEO_EXTS)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Beehive Monitor — detect anomalies in beehive camera footage.",
-    )
-    parser.add_argument(
-        "clips_dir",
-        type=Path,
-        help="Folder containing video clips (.mp4, .avi, .mov, .mkv).",
-    )
-    parser.add_argument(
-        "-o", "--output",
-        type=Path,
-        default=Path("results"),
-        help="Output directory for report and crops (default: ./results).",
-    )
-    parser.add_argument(
-        "-c", "--config",
-        type=Path,
-        default=Path("config.yaml"),
-        help="Path to config YAML (default: ./config.yaml).",
-    )
-    parser.add_argument(
-        "--level",
-        type=int,
-        choices=[1, 2],
-        default=2,
-        help="Analysis level: 1 = blob analysis only, 2 = + vision model (default: 2).",
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Verbose logging.",
-    )
-    args = parser.parse_args()
+def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
+    """Vision-first pipeline: send frames to Llama Vision, flag non-bee content."""
+    from openai import OpenAI
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    api_key = cfg.vision.api_key or os.environ.get("LLAMA_API_KEY", "")
+    if not api_key:
+        print("No Llama API key found.")
+        print("Get a free key at https://llama.developer.meta.com → Dashboard → API Keys")
+        api_key = input("  Paste your Llama API key: ").strip()
+        if not api_key:
+            log.error("No API key provided.")
+            sys.exit(1)
+    cfg.vision.api_key = api_key
 
-    # ── Load config ────────────────────────────────────────────────────
-    cfg = load_config(args.config)
-    if args.level == 1:
-        cfg.vision.enabled = False
+    client = OpenAI(
+        base_url="https://api.llama.com/compat/v1/",
+        api_key=api_key,
+    )
 
-    # ── Find clips ─────────────────────────────────────────────────────
-    clips = find_clips(args.clips_dir)
-    if not clips:
-        log.error("No video files found in %s", args.clips_dir)
-        sys.exit(1)
-    log.info("Found %d clips in %s", len(clips), args.clips_dir)
+    max_clips = cfg.vision.max_clips or len(clips)
+    clips = clips[:max_clips]
 
-    # ── Level 1: analyze each clip ─────────────────────────────────────
+    log.info("Analyzing %d clips with Llama Vision (%s)…", len(clips), cfg.vision.model)
+
+    results: list[VisionResult] = []
+    flagged: list[VisionResult] = []
+
+    for i, clip_path in enumerate(clips, 1):
+        log.info("[%d/%d] %s", i, len(clips), clip_path.name)
+        result = analyze_clip_vision(clip_path, cfg.vision, client)
+        results.append(result)
+        if result.has_non_bee_content:
+            flagged.append(result)
+
+    log.info("Vision analysis complete: %d/%d clips flagged", len(flagged), len(results))
+
+    # Build report from vision results
+    from beehive_monitor.models import FlaggedEvent
+    events = []
+    crops_map = {}
+    context_frames = {}
+
+    for i, result in enumerate(flagged):
+        # Extract a context frame for the report
+        from beehive_monitor.level2 import _extract_frames
+        frames = _extract_frames(result.clip_path, n_frames=3)
+        ctx_frame = frames[len(frames) // 2] if frames else None
+
+        event = FlaggedEvent(
+            clip_path=result.clip_path,
+            timestamp=result.timestamp,
+            frame_indices=[],
+            track=None,
+            anomaly_score={"high": 3.0, "medium": 2.0, "low": 1.0}.get(result.confidence, 1.0),
+            reasons=[
+                f"Animals seen: {', '.join(result.animals_seen)}" if result.animals_seen else "Non-bee content detected",
+                f"Threat level: {result.threat_level}",
+            ],
+            level2_response=result.description,
+            level2_confirmed=True,
+        )
+        events.append(event)
+        crops_map[i] = []
+        context_frames[i] = ctx_frame
+
+    # Also build a summary of ALL results for the JSON digest
+    args.output.mkdir(parents=True, exist_ok=True)
+
+    # Write vision-specific digest
+    import json
+    from datetime import datetime
+    digest = {
+        "generated": datetime.now().isoformat(),
+        "total_clips_analyzed": len(results),
+        "events_flagged": len(flagged),
+        "clips_with_errors": sum(1 for r in results if r.error),
+        "events": [
+            {
+                "clip": r.clip_path.name,
+                "timestamp": r.timestamp.isoformat(),
+                "has_non_bee_content": r.has_non_bee_content,
+                "animals_seen": r.animals_seen,
+                "description": r.description,
+                "confidence": r.confidence,
+                "threat_level": r.threat_level,
+            }
+            for r in flagged
+        ],
+        "all_clips": [
+            {
+                "clip": r.clip_path.name,
+                "has_non_bee_content": r.has_non_bee_content,
+                "description": r.description[:100] if r.description else "",
+                "error": r.error,
+            }
+            for r in results
+        ],
+    }
+    digest_path = args.output / "digest.json"
+    with open(digest_path, "w") as f:
+        json.dump(digest, f, indent=2)
+    log.info("Wrote %s", digest_path)
+
+    save_crops(events, crops_map, args.output)
+    write_html_report(
+        events, crops_map, context_frames,
+        len(results), args.output, cfg.report,
+        clips_dir=args.clips_dir,
+    )
+
+    # Summary
+    print(f"\n{'=' * 50}")
+    print(f"  Clips analyzed:  {len(results)}")
+    print(f"  Events flagged:  {len(flagged)}")
+    if flagged:
+        print(f"  Animals found:   {', '.join(set(a for r in flagged for a in r.animals_seen))}")
+    print(f"  Report:  {args.output / 'report.html'}")
+    print(f"  Digest:  {args.output / 'digest.json'}")
+    print(f"{'=' * 50}\n")
+
+
+def run_blob_pipeline(clips: list[Path], cfg, args) -> None:
+    """Original Level 1 blob-analysis pipeline."""
     analyses = []
     for i, clip_path in enumerate(clips, 1):
         log.info("[%d/%d] %s", i, len(clips), clip_path.name)
@@ -95,47 +165,74 @@ def main() -> None:
         tracks_info = f"{len(analysis.tracks)} tracks" if analysis.tracks else "no motion"
         log.info("  → %d frames, %s", analysis.frame_count, tracks_info)
 
-    # ── Detect outliers across the batch ───────────────────────────────
     log.info("Running outlier detection across %d clips…", len(analyses))
     events = detect_anomalies(analyses, cfg)
     log.info("Flagged %d events from %d clips", len(events), len(analyses))
 
-    # ── Extract crops for flagged events ───────────────────────────────
     crops_map: dict[int, list] = {}
+    context_frames: dict[int, any] = {}
     for i, event in enumerate(events):
-        crops = extract_crops(event)
-        crops_map[i] = crops
+        crops_map[i] = extract_crops(event)
+        context_frames[i] = extract_context_frame(event)
 
-    # ── Level 2: vision-model confirmation ─────────────────────────────
-    if cfg.vision.enabled and events:
-        log.info("Running Level 2 vision confirmation on %d events…", len(events))
-        for i, event in enumerate(events):
-            crops = crops_map.get(i, [])
-            if crops:
-                confirm_event(event, crops[: cfg.vision.max_crops_per_clip], cfg.vision)
-
-        confirmed = sum(1 for e in events if e.level2_confirmed is True)
-        dismissed = sum(1 for e in events if e.level2_confirmed is False)
-        log.info("Vision model: %d confirmed, %d dismissed, %d uncertain",
-                 confirmed, dismissed, len(events) - confirmed - dismissed)
-
-    # ── Generate reports ───────────────────────────────────────────────
     args.output.mkdir(parents=True, exist_ok=True)
     save_crops(events, crops_map, args.output)
     write_json_digest(events, len(analyses), args.output)
-    write_html_report(events, crops_map, len(analyses), args.output, cfg.report)
+    write_html_report(events, crops_map, context_frames, len(analyses), args.output, cfg.report, clips_dir=args.clips_dir)
 
-    # ── Summary ────────────────────────────────────────────────────────
     print(f"\n{'=' * 50}")
     print(f"  Clips analyzed:  {len(analyses)}")
     print(f"  Events flagged:  {len(events)}")
-    if cfg.vision.enabled:
-        confirmed = sum(1 for e in events if e.level2_confirmed is True)
-        print(f"  Vision confirmed: {confirmed}")
     print(f"  Report:  {args.output / 'report.html'}")
-    print(f"  Digest:  {args.output / 'digest.json'}")
-    print(f"  Crops:   {args.output / 'crops/'}")
     print(f"{'=' * 50}\n")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Beehive Monitor — detect interesting events in beehive camera footage.",
+    )
+    parser.add_argument(
+        "clips_dir", type=Path,
+        help="Folder containing video clips (.mp4, .avi, .mov, .mkv).",
+    )
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("results"),
+        help="Output directory for report and crops (default: ./results).",
+    )
+    parser.add_argument(
+        "-c", "--config", type=Path, default=Path("config.yaml"),
+        help="Path to config YAML (default: ./config.yaml).",
+    )
+    parser.add_argument(
+        "--level", type=int, choices=[1, 2], default=2,
+        help="1 = blob analysis only, 2 = Llama Vision (default: 2).",
+    )
+    parser.add_argument(
+        "-n", "--max-clips", type=int, default=0,
+        help="Max clips to analyze (0 = all).",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+    )
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    cfg = load_config(args.config)
+    if args.max_clips:
+        cfg.vision.max_clips = args.max_clips
+
+    clips = find_clips(args.clips_dir)
+    if not clips:
+        log.error("No video files found in %s", args.clips_dir)
+        sys.exit(1)
+    log.info("Found %d clips in %s", len(clips), args.clips_dir)
+
+    if args.level == 2 and cfg.vision.enabled:
+        run_vision_pipeline(clips, cfg, args)
+    else:
+        run_blob_pipeline(clips, cfg, args)
 
 
 if __name__ == "__main__":
