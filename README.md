@@ -47,7 +47,10 @@ cp -r /Volumes/BLINK_USB/clip/ ~/Documents/AI\ outputs/bee/clips/
 ```bash
 pip install blinkpy==0.25.6
 python download_blink.py -o ~/Documents/AI\ outputs/bee/clips --days 7
+# or for recent hours only (no USB unplug needed):
+python download_blink.py -o ~/Documents/AI\ outputs/bee/clips --hours 2
 ```
+First run prompts for Blink email, password, and 2FA PIN; subsequent runs reuse saved token in `.blink_token.json` until it expires.
 
 ### 4. Run the analysis
 
@@ -122,15 +125,22 @@ All thresholds are in `config.yaml`. Key settings:
 ```
 beehive-monitor/
 ├── run.py                      # Main CLI — batch analysis
-├── download_blink.py           # Download clips from Blink cameras
-├── portal_deploy.py            # Deploy dashboard to Meta Portal via ADB
+├── download_blink.py           # Download clips from Blink cameras (--days or --hours)
+├── rank_activity.py            # Rank top-N% by motion activity
 ├── config.yaml                 # All thresholds (edit this)
 ├── requirements.txt            # Pinned dependencies
+├── scripts/
+│   ├── auto_refresh.sh         # daily 7am pull → analyze → rank → build → adb push
+│   └── com.josephine.beehive.monitor.plist  # launchd job template
+├── portal_app/                 # Android Portal app (WebView wrapper)
+│   ├── build_dashboard.py      # generates self-contained dashboard HTML
+│   ├── deploy.sh               # build APK + install + launch first time
+│   └── refresh.sh              # push updated dashboard without rebuild
 └── beehive_monitor/
     ├── config.py               # Config loading
     ├── models.py               # Data classes
     ├── level1.py               # Blob analysis + outlier detection
-    ├── level2.py               # Vision model (Ollama/LLaVA)
+    ├── level2.py               # Vision model (Ollama or Llama API)
     └── report.py               # HTML report + JSON digest
 ```
 
@@ -138,8 +148,8 @@ beehive-monitor/
 
 | Method | Reliability | Notes |
 |--------|------------|-------|
-| **USB from Sync Module 2** | High | Best option — standard MP4s |
-| **blinkpy v0.25.6** | Fragile | 2FA auth breaks periodically |
+| **USB from Sync Module 2** | High | Best option — standard MP4s, no auth needed |
+| **blinkpy v0.25.6 cloud** | Fragile | 2FA auth breaks periodically; first run needs interactive PIN, then token saved to `.blink_token.json` for unattended runs. Use `--hours` flag for incremental pulls to stay under rate limits. |
 | **Blink app manual** | Works | One clip at a time |
 
-Sources: blinkpy GitHub (fronzbot/blinkpy v0.25.6), issues #1217, #1233.
+Sources: blinkpy GitHub (fronzbot/blinkpy v0.25.6), issues #1217, #1233. For cloud API vision analysis, Meta Llama API has rate limits — use local Ollama backend (default in config.yaml) to avoid 429 errors on large batches.

@@ -56,13 +56,17 @@ vision:
   # Set to false to skip vision analysis entirely (blob analysis only).
   enabled: true
 
-  # Llama API model via MetaGen.
-  # Key linked at metagen-llm-api-keys.nest.x2p.facebook.net
-  # Set LLAMA_API_KEY env var or paste when prompted.
-  model: "Llama-4-Scout-17B-16E-Instruct-FP8"
+  # Local Ollama backend (recommended — no rate limits, runs offline on Mac GPU).
+  # Install from https://ollama.com/download then:  ollama pull llama3.2-vision
+  # Ensure ollama serve is running (it auto-starts on macOS) before running run.py
+  # To use Meta Llama API cloud instead, switch backend to "llama_api",
+  # set host to "https://api.llama.com/compat/v1/", model to
+  # "Llama-4-Scout-17B-16E-Instruct-FP8", and set LLAMA_API_KEY env var.
+  # Cloud API has rate limits (~3 QPS) — use --level 1 or small batches if you hit 429.
+  backend: "ollama"
+  host: "http://127.0.0.1:11434"
+  model: "llama3.2-vision"
   api_key: ""
-  host: "https://api.llama.com/compat/v1/"
-  backend: "llama_api"
 
   # Max clips to analyze per run (0 = no limit).
   max_clips: 0
