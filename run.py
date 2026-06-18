@@ -66,78 +66,101 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
 
     log.info("Analyzing %d clips with Ollama/%s…", len(clips), cfg.vision.model)
 
+    # Load any previously saved incremental results to resume
+    incremental_file = args.output / "vision_progress.jsonl"
+    already_done: set[str] = set()
+    if incremental_file.exists():
+        for line in incremental_file.read_text().strip().splitlines():
+            try:
+                r = json.loads(line)
+                already_done.add(r["clip"])
+            except (json.JSONDecodeError, KeyError):
+                pass
+        log.info("Resuming — %d clips already processed", len(already_done))
+
     results: list[VisionResult] = []
     flagged: list[VisionResult] = []
 
-    for i, clip_path in enumerate(clips, 1):
-        log.info("[%d/%d] %s", i, len(clips), clip_path.name)
-        result = analyze_clip_vision(clip_path, cfg.vision)
-        results.append(result)
-        if result.has_non_bee_content:
-            flagged.append(result)
+    with open(incremental_file, "a") as progress_f:
+        for i, clip_path in enumerate(clips, 1):
+            if clip_path.name in already_done:
+                continue
+            log.info("[%d/%d] %s", i, len(clips), clip_path.name)
+            result = analyze_clip_vision(clip_path, cfg.vision)
+            results.append(result)
+            if result.has_non_bee_content:
+                flagged.append(result)
+            # Save incrementally
+            progress_f.write(json.dumps({
+                "clip": clip_path.name,
+                "has_non_bee_content": result.has_non_bee_content,
+                "animals_seen": result.animals_seen,
+                "description": result.description,
+                "confidence": result.confidence,
+                "threat_level": result.threat_level,
+                "error": result.error,
+                "timestamp": result.timestamp.isoformat(),
+            }) + "\n")
+            progress_f.flush()
 
-    log.info("Vision analysis complete: %d/%d clips flagged", len(flagged), len(results))
+    # Merge with previously completed results
+    all_results_data = []
+    if incremental_file.exists():
+        for line in incremental_file.read_text().strip().splitlines():
+            try:
+                all_results_data.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
 
-    # Build report from vision results
+    total_analyzed = len(all_results_data)
+    all_flagged = [r for r in all_results_data if r.get("has_non_bee_content")]
+    log.info("Vision analysis complete: %d/%d clips flagged", len(all_flagged), total_analyzed)
+
+    # Build report from flagged results
     from beehive_monitor.models import FlaggedEvent
     events = []
     crops_map = {}
     context_frames = {}
 
-    for i, result in enumerate(flagged):
-        # Extract a context frame for the report
+    for i, r_data in enumerate(all_flagged):
+        clip_path = Path(args.clips_dir) / r_data["clip"]
         from beehive_monitor.level2 import _extract_frames
-        frames = _extract_frames(result.clip_path, n_frames=3)
+        frames = _extract_frames(clip_path, n_frames=3) if clip_path.exists() else []
         ctx_frame = frames[len(frames) // 2] if frames else None
 
         event = FlaggedEvent(
-            clip_path=result.clip_path,
-            timestamp=result.timestamp,
+            clip_path=clip_path,
+            timestamp=datetime.fromisoformat(r_data["timestamp"]),
             frame_indices=[],
             track=None,
-            anomaly_score={"high": 3.0, "medium": 2.0, "low": 1.0}.get(result.confidence, 1.0),
+            anomaly_score={"high": 3.0, "medium": 2.0, "low": 1.0}.get(r_data.get("confidence", ""), 1.0),
             reasons=[
-                f"Animals seen: {', '.join(result.animals_seen)}" if result.animals_seen else "Non-bee content detected",
-                f"Threat level: {result.threat_level}",
+                f"Animals seen: {', '.join(r_data.get('animals_seen', []))}" if r_data.get("animals_seen") else "Non-bee content detected",
+                f"Threat level: {r_data.get('threat_level', 'unknown')}",
             ],
-            level2_response=result.description,
+            level2_response=r_data.get("description", ""),
             level2_confirmed=True,
         )
         events.append(event)
         crops_map[i] = []
         context_frames[i] = ctx_frame
 
-    # Also build a summary of ALL results for the JSON digest
     args.output.mkdir(parents=True, exist_ok=True)
 
-    # Write vision-specific digest
-    import json
-    from datetime import datetime
     digest = {
         "generated": datetime.now().isoformat(),
-        "total_clips_analyzed": len(results),
-        "events_flagged": len(flagged),
-        "clips_with_errors": sum(1 for r in results if r.error),
-        "events": [
-            {
-                "clip": r.clip_path.name,
-                "timestamp": r.timestamp.isoformat(),
-                "has_non_bee_content": r.has_non_bee_content,
-                "animals_seen": r.animals_seen,
-                "description": r.description,
-                "confidence": r.confidence,
-                "threat_level": r.threat_level,
-            }
-            for r in flagged
-        ],
+        "total_clips_analyzed": total_analyzed,
+        "events_flagged": len(all_flagged),
+        "clips_with_errors": sum(1 for r in all_results_data if r.get("error")),
+        "events": all_flagged,
         "all_clips": [
             {
-                "clip": r.clip_path.name,
-                "has_non_bee_content": r.has_non_bee_content,
-                "description": r.description[:100] if r.description else "",
-                "error": r.error,
+                "clip": r.get("clip", ""),
+                "has_non_bee_content": r.get("has_non_bee_content", False),
+                "description": r.get("description", "")[:100],
+                "error": r.get("error", ""),
             }
-            for r in results
+            for r in all_results_data
         ],
     }
     digest_path = args.output / "digest.json"
@@ -148,16 +171,16 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
     save_crops(events, crops_map, args.output)
     write_html_report(
         events, crops_map, context_frames,
-        len(results), args.output, cfg.report,
+        total_analyzed, args.output, cfg.report,
         clips_dir=args.clips_dir,
     )
 
     # Summary
     print(f"\n{'=' * 50}")
-    print(f"  Clips analyzed:  {len(results)}")
-    print(f"  Events flagged:  {len(flagged)}")
-    if flagged:
-        print(f"  Animals found:   {', '.join(set(a for r in flagged for a in r.animals_seen))}")
+    print(f"  Clips analyzed:  {total_analyzed}")
+    print(f"  Events flagged:  {len(all_flagged)}")
+    if all_flagged:
+        print(f"  Animals found:   {', '.join(set(a for r in all_flagged for a in r.get('animals_seen', [])))}")
     print(f"  Report:  {args.output / 'report.html'}")
     print(f"  Digest:  {args.output / 'digest.json'}")
     print(f"{'=' * 50}\n")
