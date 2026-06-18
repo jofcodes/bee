@@ -63,9 +63,6 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
             sys.exit(1)
         cfg.vision.api_key = api_key
 
-    max_clips = cfg.vision.max_clips or len(clips)
-    clips = clips[:max_clips]
-
     log.info("Analyzing %d clips with Ollama/%s…", len(clips), cfg.vision.model)
 
     # Load any previously saved incremental results to resume
@@ -80,16 +77,24 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
                 pass
         log.info("Resuming — %d clips already processed", len(already_done))
 
+    # Filter to only unprocessed clips, then apply max_clips limit
+    remaining_clips = [c for c in clips if c.name not in already_done]
+    max_clips = cfg.vision.max_clips or len(remaining_clips)
+    remaining_clips = remaining_clips[:max_clips]
+
+    if not remaining_clips:
+        log.info("All clips already processed")
+    else:
+        log.info("Processing %d remaining clips", len(remaining_clips))
+
     results: list[VisionResult] = []
     flagged: list[VisionResult] = []
 
     import time
 
     with open(incremental_file, "a") as progress_f:
-        for i, clip_path in enumerate(clips, 1):
-            if clip_path.name in already_done:
-                continue
-            log.info("[%d/%d] %s", i, len(clips), clip_path.name)
+        for i, clip_path in enumerate(remaining_clips, 1):
+            log.info("[%d/%d] %s", i, len(remaining_clips), clip_path.name)
             result = analyze_clip_vision(clip_path, cfg.vision)
             results.append(result)
             if result.has_non_bee_content:
@@ -106,7 +111,7 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
                 "timestamp": result.timestamp.isoformat(),
             }) + "\n")
             progress_f.flush()
-            time.sleep(1)  # Stay under API rate limit (3 QPS max)
+            time.sleep(2)  # Stay under API rate limit (3 QPS max)
 
     # Merge with previously completed results
     all_results_data = []

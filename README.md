@@ -72,19 +72,29 @@ Open `results/report.html` in your browser. Each flagged event shows:
 
 ### 6. Deploy to Portal
 
-Install the results as a **real Portal app** — one scrolling page showing
-threats first, then the top-10% most active clips, with tap-to-fullscreen and an
-ambient (auto-advancing, muted) background loop. Full setup and architecture are
-in **[portal_app/README.md](portal_app/README.md)**. Quick version:
+The Portal app shows threats first, then most active grid, with Exit button top-right to return to Portal Home, Ambient button for muted loop, swipe gestures for navigation, and normal screen timeout except in Ambient mode.
+
 ```bash
-brew install --cask android-platform-tools          # one-time (adb)
-# Connect Portal via USB-C, enable ADB in Settings → Debug
-python rank_activity.py clips -o results --percentile 10   # rank the top 10%
-cd portal_app && ./deploy.sh                         # build APK + install + launch
+# one-time: install adb
+brew install --cask android-platform-tools
+# or without brew:
+# curl -O https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
+# unzip -q platform-tools-latest-darwin.zip ; sudo mv platform-tools /usr/local/
+# echo 'export PATH=/usr/local/platform-tools:$PATH' >> ~/.zshrc
+
+# Connect Portal via USB-C, enable ADB in Settings → Debug, tap Allow
+adb devices   # should list your Portal
+
+# rank and deploy
+python rank_activity.py clips -o results --percentile 10
+cd portal_app && ./deploy.sh    # first time builds APK, installs, launches
+# or open portal_app in Android Studio and press Run
+
+# after new scans, no rebuild needed:
+cd portal_app && ./refresh.sh
 ```
 
-For a quick browser preview of exactly what the Portal will show, open
-`results/portal_dashboard.html`.
+For a quick browser preview open `results/portal_dashboard.html` — same HTML the Portal app renders offline.
 
 ## Configuration
 

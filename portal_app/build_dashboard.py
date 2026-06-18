@@ -288,6 +288,10 @@ _TEMPLATE = r"""<!DOCTYPE html>
                  border:none; border-radius:999px; padding:12px 22px; font-size:1rem;
                  font-weight:700; cursor:pointer; white-space:nowrap; }
   .ambient-btn:active { transform:scale(.96); }
+  .exit-btn { background:transparent; color:var(--muted); border:1px solid #3a2f17;
+              border-radius:999px; padding:12px 18px; font-size:.95rem; font-weight:600;
+              cursor:pointer; white-space:nowrap; }
+  .exit-btn:active { transform:scale(.96); background:#1f1a12; }
 
   section { padding:22px 22px 8px; }
   .sec-title { display:flex; align-items:center; gap:10px; font-size:1.15rem;
@@ -358,8 +362,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <div class="wrap">
   <header>
     <div><h1>&#x1f41d; Beehive Monitor</h1></div>
-    <div style="display:flex;align-items:center;gap:16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
       <div class="meta" id="meta"></div>
+      <button class="exit-btn" id="exitBtn">&#x2715; Exit</button>
       <button class="ambient-btn" id="ambientBtn">&#x25b6; Ambient</button>
     </div>
   </header>
@@ -468,11 +473,13 @@ function openOverlay(kind, idx, isAmbient){
   if (overlay.requestFullscreen) overlay.requestFullscreen().catch(()=>{});
   show(pos);
   scheduleHide();
+  try { if(window.Beehive && Beehive.setKeepScreenOn) Beehive.setKeepScreenOn(ambient); } catch(e){}
 }
 function closeOverlay(){
   player.pause(); player.removeAttribute('src'); player.load();
   overlay.classList.remove('active'); ambient=false;
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+  try { if(window.Beehive && Beehive.setKeepScreenOn) Beehive.setKeepScreenOn(false); } catch(e){}
 }
 function scheduleHide(){
   capEl.style.opacity='1'; clearTimeout(hideTimer);
@@ -484,6 +491,10 @@ document.addEventListener('click', e=>{
   if (card) openOverlay(card.dataset.kind, +card.dataset.idx, false);
 });
 $('#ambientBtn').addEventListener('click', ()=> openOverlay('activity', 0, true));
+$('#exitBtn').addEventListener('click', ()=>{
+  try { if (window.Beehive && Beehive.exit) Beehive.exit(); else history.back(); }
+  catch(e){ window.close(); }
+});
 $('#ovClose').addEventListener('click', closeOverlay);
 $('#ovPrev').addEventListener('click', ()=>{ show(pos-1); scheduleHide(); });
 $('#ovNext').addEventListener('click', ()=>{ show(pos+1); scheduleHide(); });

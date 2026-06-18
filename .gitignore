@@ -8,5 +8,20 @@ blink_clips/
 .env
 .llama_key
 clips/
-results/
 .DS_Store
+# local briefs and temp downloads
+PORTAL_BRIEF.md
+platform-tools*.zip
+platform-tools-latest*.zip
+recent_clips/
+# Android Studio / Gradle generated — keep wrapper scripts but ignore build outputs
+portal_app/.gradle/
+portal_app/.idea/
+portal_app/app/build/
+portal_app/app/release/
+portal_app/build/
+portal_app/captures/
+portal_app/*.iml
+portal_app/local.properties
+*.apk
+*.aab

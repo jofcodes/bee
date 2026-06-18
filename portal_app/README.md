@@ -6,10 +6,12 @@ analysis results. It is deployed the way the
 guide prescribes — `adb install` → `am start -n` — so it shows up as its own app
 on the device (launcher icon, full-screen, no browser chrome).
 
-Under the hood it's a thin **WebView wrapper**: one full-screen, kiosk-style
-Activity that renders a single self-contained dashboard page. Stills and video
-are embedded as base64, so it runs **offline on the Portal with no network and no
-server** (the app requests no INTERNET permission).
+Under the hood it's a thin **WebView wrapper**: one full-screen Activity that
+renders a single self-contained dashboard page. Stills and video are embedded
+as base64, so it runs **offline on the Portal with no network and no server**
+(the app requests no INTERNET permission). The app behaves like a normal Portal
+app: tap the Beehive Monitor icon to open, tap Exit in the header or press Home
+to leave, swipe from screen edge to reveal system navigation.
 
 ---
 
@@ -55,11 +57,12 @@ No command line? Open the `portal_app/` folder in **Android Studio** and press
 |---|---|
 | Tap a card | Open that clip fullscreen |
 | Swipe left / right · ← → | Next / previous clip |
-| Swipe down · ✕ · Esc | Exit fullscreen |
-| Ambient button · `#ambient` URL | Start the muted auto-advancing loop |
+| Swipe down · ✕ · Esc | Exit fullscreen back to grid |
+| Exit button top-right | Close app and return to Portal Home |
+| Ambient button top-right | Start muted auto-advancing loop |
+| Swipe from top or bottom edge | Reveal system navigation bar, then tap Home |
 
-The Portal stays awake while the app is open (screen-on flag), so ambient mode
-works as an always-on display.
+The app uses non-sticky immersive mode — swipe from screen edge reveals system bars and they stay visible until you tap back into content. Screen timeout follows normal Portal settings except in Ambient mode, where keep-screen-on is enabled so it works as always-on display. Tap Exit or press Home to leave at any time.
 
 ---
 
@@ -91,9 +94,11 @@ works as an always-on display.
                                       └─────────────────────────┘
 ```
 
-The WebView is configured for a media display: JavaScript on, autoplay allowed
+The WebView is configured for media display: JavaScript on, autoplay allowed
 (`mediaPlaybackRequiresUserGesture=false`), HTML5 fullscreen bridged to a real
-fullscreen surface, immersive system-bar hiding, and keep-screen-on.
+fullscreen surface, immersive non-sticky system bar hiding, and a JavaScript
+bridge (`Beehive.exit()`, `Beehive.setKeepScreenOn()`) for Exit button and
+ambient keep-awake control.
 
 ---
 
@@ -206,6 +211,8 @@ preview exactly what the Portal will show.
 | Red bounding boxes on stills of detected objects | `boxed_still()` (reuses `beehive_monitor` Level-1) |
 | Vision model's description | merged from `vision_progress.jsonl` / `digest.json` |
 | Swipe / touch navigation | touch handlers (swipe = prev/next/exit) |
+| Exit button → return to Portal Home | header button + `Beehive.exit()` JS bridge → `finish()` in `MainActivity.java` |
+| Normal app behavior, not kiosk | non-sticky immersive, no keep-screen-on except ambient, launcher icon |
 | Refreshable on new results | `refresh.sh` (push) / `deploy.sh` (reinstall) |
 | Threats first → activity → ambient fullscreen | single-page layout + Ambient mode |
 
@@ -236,6 +243,7 @@ portal_app/
 
 - **`adb` shows nothing** — re-tap *ADB Enabled* on the Portal; re-run
   `maui devices`; reseat the USB-C cable.
+- **How to exit the app** — tap **Exit** button top-right in header, or press Back until you leave grid view, or swipe from top/bottom edge to reveal system navigation then tap Home. From adb: `adb shell input keyevent 3`.
 - **Gradle/JDK error** — AGP 8.2 needs **JDK 17**. Build in Android Studio
   (bundles it) or point `JAVA_HOME` at a JDK 17.
 - **No `./gradlew`** — open once in Android Studio, or run `gradle wrapper`.
