@@ -56,13 +56,13 @@ vision:
   # Set to false to skip vision analysis entirely (blob analysis only).
   enabled: true
 
-  # Ollama model. Use Meta's Llama 3.2 Vision (Meta-approved).
-  # Install: brew install ollama && ollama pull llama3.2-vision
-  # Do NOT use third-party models with unclear licensing.
-  model: "llama3.2-vision"
-
-  # Ollama host — keep bound to localhost only.
-  host: "http://127.0.0.1:11434"
+  # Llama API model via MetaGen.
+  # Key linked at metagen-llm-api-keys.nest.x2p.facebook.net
+  # Set LLAMA_API_KEY env var or paste when prompted.
+  model: "Llama-4-Scout-17B-16E-Instruct-FP8"
+  api_key: ""
+  host: "https://api.llama.com/compat/v1/"
+  backend: "llama_api"
 
   # Max clips to analyze per run (0 = no limit).
   max_clips: 0

@@ -35,22 +35,31 @@ def find_clips(folder: Path) -> list[Path]:
 
 
 def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
-    """Vision-first pipeline: send frames to Ollama/LLaVA, flag non-bee content."""
-    # Check Ollama is available on localhost
-    try:
-        import ollama as ollama_lib
-        ollama_client = ollama_lib.Client(host=cfg.vision.host)
-        ollama_client.list()
-    except Exception as exc:
-        log.error(
-            "Cannot connect to Ollama at %s: %s\n"
-            "Make sure Ollama is installed and running:\n"
-            "  1. Install from https://ollama.com/download\n"
-            "  2. Open Ollama from Applications\n"
-            "  3. Run: ollama pull llama3.2-vision",
-            cfg.vision.host, exc,
-        )
-        sys.exit(1)
+    """Vision-first pipeline: send frames to vision model, flag non-bee content."""
+
+    if cfg.vision.backend == "ollama":
+        try:
+            import ollama as ollama_lib
+            ollama_client = ollama_lib.Client(host=cfg.vision.host)
+            ollama_client.list()
+        except Exception as exc:
+            log.error("Cannot connect to Ollama at %s: %s", cfg.vision.host, exc)
+            sys.exit(1)
+    else:
+        # Llama API — need API key
+        api_key = cfg.vision.api_key or os.environ.get("LLAMA_API_KEY", "")
+        if not api_key:
+            key_file = Path(".llama_key")
+            if key_file.exists():
+                api_key = key_file.read_text().strip()
+        if not api_key:
+            print("No Llama API key found.")
+            print("Save key to .llama_key file or set LLAMA_API_KEY env var")
+            api_key = input("  Or paste your Llama API key now: ").strip()
+        if not api_key:
+            log.error("No API key provided.")
+            sys.exit(1)
+        cfg.vision.api_key = api_key
 
     max_clips = cfg.vision.max_clips or len(clips)
     clips = clips[:max_clips]

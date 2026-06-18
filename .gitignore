@@ -6,3 +6,7 @@ blink_clips/
 .blink_token.json
 *.egg-info/
 .env
+.llama_key
+clips/
+results/
+.DS_Store

@@ -41,8 +41,10 @@ class OutlierConfig:
 @dataclass
 class VisionConfig:
     enabled: bool = True
-    model: str = "llama3.2-vision"
-    host: str = "http://127.0.0.1:11434"
+    model: str = "Llama-4-Scout-17B-16E-Instruct-FP8"
+    api_key: str = ""
+    host: str = "https://api.llama.com/compat/v1/"
+    backend: str = "llama_api"  # "llama_api" or "ollama"
     max_clips: int = 0
 
 
