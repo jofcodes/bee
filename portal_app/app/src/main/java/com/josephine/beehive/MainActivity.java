@@ -164,5 +164,27 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        @android.webkit.JavascriptInterface
+        public void refresh() {
+            runOnUiThread(() -> {
+                // Reload dashboard from external files dir if present, else asset.
+                // Adding cache-bust query param forces WebView to bypass cache.
+                String url = resolveDashboardUrl();
+                web.loadUrl(url + "?t=" + System.currentTimeMillis());
+            });
+        }
+        @android.webkit.JavascriptInterface
+        public String lastRefreshTime() {
+            // Read timestamp written by auto_refresh.sh to external files dir if present
+            try {
+                java.io.File f = new java.io.File(getExternalFilesDir(null), "last_refresh.txt");
+                if (!f.exists()) f = new java.io.File(getFilesDir(), "../results/last_refresh.txt"); // fallback unlikely
+                if (f.exists()) {
+                    java.util.Scanner s = new java.util.Scanner(f).useDelimiter("\\A");
+                    return s.hasNext() ? s.next().trim() : "";
+                }
+            } catch (Exception ignored) {}
+            return "";
+        }
     }
 }

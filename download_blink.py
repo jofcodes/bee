@@ -99,6 +99,7 @@ async def download_clips(
     password: str,
     output_dir: Path,
     days: int | None = None,
+    hours: int | None = None,
 ) -> int:
     """Authenticate and download clips. Returns count of downloaded clips."""
 
@@ -186,7 +187,10 @@ async def download_clips(
     # Download clips
     output_dir.mkdir(parents=True, exist_ok=True)
     since = None
-    if days:
+    if hours:
+        since = (datetime.now() - timedelta(hours=hours)).isoformat()
+        log.info("Downloading clips from the last %d hour(s)", hours)
+    elif days:
         since = (datetime.now() - timedelta(days=days)).isoformat()
         log.info("Downloading clips from the last %d day(s)", days)
 
@@ -223,6 +227,12 @@ def main() -> None:
         help="Only download clips from the last N days.",
     )
     parser.add_argument(
+        "--hours",
+        type=int,
+        default=None,
+        help="Only download clips from the last N hours (overrides --days if set).",
+    )
+    parser.add_argument(
         "--email",
         type=str,
         default=None,
@@ -236,7 +246,7 @@ def main() -> None:
         email = input("  Email: ").strip()
     password = getpass.getpass("  Password: ")
 
-    count = asyncio.run(download_clips(email, password, args.output, args.days))
+    count = asyncio.run(download_clips(email, password, args.output, args.days, args.hours))
 
     if count > 0:
         print(f"\nDone! {count} clips saved to {args.output}")

@@ -292,6 +292,11 @@ _TEMPLATE = r"""<!DOCTYPE html>
               border-radius:999px; padding:12px 18px; font-size:.95rem; font-weight:600;
               cursor:pointer; white-space:nowrap; }
   .exit-btn:active { transform:scale(.96); background:#1f1a12; }
+  .refresh-btn { background:transparent; color:var(--gold); border:1px solid #4a3a1a;
+                 border-radius:999px; padding:12px 18px; font-size:.95rem; font-weight:600;
+                 cursor:pointer; white-space:nowrap; }
+  .refresh-btn:active { transform:scale(.96); background:#1f1a12; }
+  .refresh-btn.spinning { opacity:0.6; pointer-events:none; }
 
   section { padding:22px 22px 8px; }
   .sec-title { display:flex; align-items:center; gap:10px; font-size:1.15rem;
@@ -364,6 +369,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div><h1>&#x1f41d; Beehive Monitor</h1></div>
     <div style="display:flex;align-items:center;gap:12px;">
       <div class="meta" id="meta"></div>
+      <button class="refresh-btn" id="refreshBtn">&#x21bb; Refresh</button>
       <button class="exit-btn" id="exitBtn">&#x2715; Exit</button>
       <button class="ambient-btn" id="ambientBtn">&#x25b6; Ambient</button>
     </div>
@@ -399,8 +405,12 @@ function esc(t){ const d=document.createElement('div'); d.textContent=t==null?''
 function lvlClass(l){ return l==='high'?'lv-high':l==='medium'?'lv-medium':l==='low'?'lv-low':''; }
 
 // ---- render ----
-$('#meta').innerHTML = 'Top ' + DATA.percentile + '% of ' + DATA.total +
-  ' analyzed clips<br>Updated ' + esc(DATA.generated);
+let lastRefresh = '';
+try { if (window.Beehive && Beehive.lastRefreshTime) lastRefresh = Beehive.lastRefreshTime(); } catch(e){}
+let metaHtml = 'Top ' + DATA.percentile + '% of ' + DATA.total + ' analyzed clips<br>Updated ' + esc(DATA.generated);
+if (lastRefresh) { metaHtml += '<br>Auto refresh daily at 7 AM &bull; last check ' + esc(lastRefresh); }
+else { metaHtml += '<br>Auto refresh daily at 7 AM'; }
+$('#meta').innerHTML = metaHtml;
 $('#threatPill').textContent = DATA.threats.length + ' flagged';
 $('#activityPill').textContent = DATA.activity.length + ' clips';
 
@@ -494,6 +504,18 @@ $('#ambientBtn').addEventListener('click', ()=> openOverlay('activity', 0, true)
 $('#exitBtn').addEventListener('click', ()=>{
   try { if (window.Beehive && Beehive.exit) Beehive.exit(); else history.back(); }
   catch(e){ window.close(); }
+});
+$('#refreshBtn').addEventListener('click', ()=>{
+  const btn=$('#refreshBtn'); btn.classList.add('spinning'); btn.textContent='↻ Refreshing...';
+  try {
+    if (window.Beehive && Beehive.refresh) {
+      Beehive.refresh();
+      // reload page after short delay to pick up new dashboard pushed via adb
+      setTimeout(()=>{ location.reload(); }, 1200);
+    } else {
+      location.reload();
+    }
+  } catch(e){ location.reload(); }
 });
 $('#ovClose').addEventListener('click', closeOverlay);
 $('#ovPrev').addEventListener('click', ()=>{ show(pos-1); scheduleHide(); });

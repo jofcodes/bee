@@ -96,6 +96,16 @@ cd portal_app && ./refresh.sh
 
 For a quick browser preview open `results/portal_dashboard.html` — same HTML the Portal app renders offline.
 
+### 7. Automatic daily refresh at 7 AM
+
+On your Mac, enable the launchd job once:
+```bash
+launchctl load ~/Library/LaunchAgents/com.josephine.beehive.monitor.plist
+```
+Every morning at 7 AM it runs `scripts/auto_refresh.sh` which pulls Blink clips since last run (`--hours` auto-computed), runs vision analysis incrementally, ranks top 10%, rebuilds dashboard, and pushes to Portal via adb if connected. Logs go to `logs/auto_refresh.out.log`. In the Portal app header tap Refresh to reload latest pushed dashboard, Exit to return Home, Ambient for fullscreen loop.
+
+Disable with `launchctl unload ~/Library/LaunchAgents/com.josephine.beehive.monitor.plist`.
+
 ## Configuration
 
 All thresholds are in `config.yaml`. Key settings:

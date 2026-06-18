@@ -27,10 +27,18 @@ cd portal_app
 # after each new analysis scan:
 ./refresh.sh         # regenerate + push the new dashboard (no rebuild)
 ./refresh.sh --rank  # also recompute the top 10% first
+
+# automatic daily refresh at 7 AM (pulls Blink cloud, analyzes, pushes to Portal if connected):
+# one-time setup on your Mac:
+launchctl load ~/Library/LaunchAgents/com.josephine.beehive.monitor.plist
+# or run manually anytime:
+../scripts/auto_refresh.sh
 ```
 
 No command line? Open the `portal_app/` folder in **Android Studio** and press
-**Run ▶** with the Portal selected.
+**Run ▶** with the Portal selected. In the app header tap **Refresh** to reload
+the latest dashboard pushed from your Mac, **Exit** to return to Portal Home,
+or **Ambient** for fullscreen loop.
 
 ---
 
@@ -58,8 +66,9 @@ No command line? Open the `portal_app/` folder in **Android Studio** and press
 | Tap a card | Open that clip fullscreen |
 | Swipe left / right · ← → | Next / previous clip |
 | Swipe down · ✕ · Esc | Exit fullscreen back to grid |
+| Refresh button top-right | Reload dashboard from latest pushed version; shows last auto-refresh time |
 | Exit button top-right | Close app and return to Portal Home |
-| Ambient button top-right | Start muted auto-advancing loop |
+| Ambient button top-right | Start muted auto-advancing loop, keeps screen awake |
 | Swipe from top or bottom edge | Reveal system navigation bar, then tap Home |
 
 The app uses non-sticky immersive mode — swipe from screen edge reveals system bars and they stay visible until you tap back into content. Screen timeout follows normal Portal settings except in Ambient mode, where keep-screen-on is enabled so it works as always-on display. Tap Exit or press Home to leave at any time.
@@ -200,6 +209,40 @@ python portal_app/build_dashboard.py \
 `results/portal_dashboard.html` is a normal web page — open it in any browser to
 preview exactly what the Portal will show.
 
+### Automatic daily refresh at 7 AM
+
+On your Mac, a launchd job runs every morning at 7:00 AM to pull new Blink clips,
+analyze them with Ollama vision model, rank activity, rebuild the dashboard,
+and push to Portal if it's connected via USB or on same ADB network.
+
+One-time setup:
+```bash
+# script already at scripts/auto_refresh.sh in repo
+launchctl load ~/Library/LaunchAgents/com.josephine.beehive.monitor.plist
+# check status:
+launchctl list | grep beehive
+# run manually anytime to test:
+~/Documents/AI\ outputs/bee/scripts/auto_refresh.sh
+# view logs:
+tail -f ~/Documents/AI\ outputs/bee/logs/auto_refresh.out.log
+```
+
+The script does:
+1. start Ollama if needed
+2. compute hours since last successful refresh (from `results/last_refresh.txt`)
+3. `python download_blink.py -o recent_clips --hours N` — uses saved `.blink_token.json` so no 2FA prompt after first interactive login; if token expired it logs warning and falls back to existing clips folder
+4. `python run.py` on new clips (incremental resume via vision_progress.jsonl)
+5. `python rank_activity.py --percentile 10`
+6. `python portal_app/build_dashboard.py` regenerates HTML with updated timestamp
+7. `adb push` to Portal dashboard folder if device connected, then relaunches app; if not connected, dashboard waits on disk for next manual refresh or next day when plugged in
+
+In-app UI shows "Auto refresh daily at 7 AM" in header meta line, and last check timestamp if available via `Beehive.lastRefreshTime()`. Tap Refresh button top-right in app header to reload the latest pushed dashboard instantly without reinstall.
+
+To disable automatic runs:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.josephine.beehive.monitor.plist
+```
+
 ---
 
 ## Requirement → where it lives
@@ -223,7 +266,7 @@ preview exactly what the Portal will show.
 ```
 portal_app/
 ├── README.md             # this document
-├── build_dashboard.py    # generates the dashboard HTML (boxes + vision + playback)
+├── build_dashboard.py    # generates dashboard HTML (boxes + vision + playback + Exit/Refresh buttons)
 ├── deploy.sh             # generate → build APK → install → launch on Portal
 ├── refresh.sh            # regenerate + push new dashboard (no reinstall)
 ├── settings.gradle, build.gradle, gradle.properties
@@ -231,10 +274,12 @@ portal_app/
     ├── build.gradle      # plain Java app, no AndroidX deps; minSdk 24, targetSdk 34
     └── src/main/
         ├── AndroidManifest.xml         # launcher activity; no INTERNET permission
-        ├── java/com/josephine/beehive/MainActivity.java
+        ├── java/com/josephine/beehive/MainActivity.java  # WebView + Beehive JS bridge exit/refresh/setKeepScreenOn
         ├── assets/dashboard/index.html # generated dashboard (gitignored)
         └── res/                        # icon, strings, fullscreen theme
 ../rank_activity.py        # activity ranking → results/top_activity.json
+../scripts/auto_refresh.sh # daily 7am pull Blink → analyze → rank → build → adb push
+~/Library/LaunchAgents/com.josephine.beehive.monitor.plist  # launchd schedule
 ```
 
 ---
