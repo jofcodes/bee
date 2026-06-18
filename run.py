@@ -83,6 +83,8 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
     results: list[VisionResult] = []
     flagged: list[VisionResult] = []
 
+    import time
+
     with open(incremental_file, "a") as progress_f:
         for i, clip_path in enumerate(clips, 1):
             if clip_path.name in already_done:
@@ -104,6 +106,7 @@ def run_vision_pipeline(clips: list[Path], cfg, args) -> None:
                 "timestamp": result.timestamp.isoformat(),
             }) + "\n")
             progress_f.flush()
+            time.sleep(1)  # Stay under API rate limit (3 QPS max)
 
     # Merge with previously completed results
     all_results_data = []

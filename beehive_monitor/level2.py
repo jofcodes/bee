@@ -146,29 +146,40 @@ def _parse_response(text: str) -> dict:
 
 
 def _call_llama_api(b64: str, vision_cfg: VisionConfig) -> str:
-    """Call Meta's Llama API with an image."""
+    """Call Meta's Llama API with an image, with retry on rate limit."""
+    import time
     from openai import OpenAI
 
     api_key = vision_cfg.api_key or os.environ.get("LLAMA_API_KEY", "")
     client = OpenAI(base_url=vision_cfg.host, api_key=api_key)
 
-    response = client.chat.completions.create(
-        model=vision_cfg.model,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": ANALYSIS_PROMPT},
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=vision_cfg.model,
+                messages=[
                     {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                    },
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": ANALYSIS_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                            },
+                        ],
+                    }
                 ],
-            }
-        ],
-        max_tokens=300,
-    )
-    return response.choices[0].message.content
+                max_tokens=300,
+            )
+            return response.choices[0].message.content
+        except Exception as exc:
+            if "429" in str(exc) and attempt < 2:
+                wait = 2 ** (attempt + 1)
+                log.debug("Rate limited, waiting %ds...", wait)
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("Max retries exceeded")
 
 
 def _call_ollama(b64: str, vision_cfg: VisionConfig) -> str:
