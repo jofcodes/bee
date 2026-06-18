@@ -1,0 +1,5 @@
+// Top-level build file. No Kotlin plugin — the app is plain Java to keep the
+// build minimal (a single WebView Activity, no AndroidX dependencies needed).
+plugins {
+    id 'com.android.application' version '8.2.2' apply false
+}

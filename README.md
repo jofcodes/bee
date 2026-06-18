@@ -70,14 +70,21 @@ Open `results/report.html` in your browser. Each flagged event shows:
 - What the vision model identified
 - Anomaly score and reasons
 
-### 6. Deploy to Portal (optional)
+### 6. Deploy to Portal
 
-Show the most interesting clips on a Meta Portal as a fullscreen slideshow:
+Install the results as a **real Portal app** — one scrolling page showing
+threats first, then the top-10% most active clips, with tap-to-fullscreen and an
+ambient (auto-advancing, muted) background loop. Full setup and architecture are
+in **[portal_app/README.md](portal_app/README.md)**. Quick version:
 ```bash
-brew install --cask android-platform-tools
+brew install --cask android-platform-tools          # one-time (adb)
 # Connect Portal via USB-C, enable ADB in Settings → Debug
-python portal_deploy.py ~/Documents/AI\ outputs/bee/results --top 10
+python rank_activity.py clips -o results --percentile 10   # rank the top 10%
+cd portal_app && ./deploy.sh                         # build APK + install + launch
 ```
+
+For a quick browser preview of exactly what the Portal will show, open
+`results/portal_dashboard.html`.
 
 ## Configuration
 

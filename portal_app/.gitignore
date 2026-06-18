@@ -1,0 +1,11 @@
+# Android / Gradle build artifacts
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.iml
+.idea/
+
+# Generated dashboard (regenerate from results/ with build_dashboard.py)
+app/src/main/assets/dashboard/index.html

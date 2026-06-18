@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.josephine.beehive'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.josephine.beehive"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // The dashboard HTML embeds base64 video; don't compress it twice.
+    androidResources {
+        noCompress 'html'
+    }
+}
+
+dependencies {
+    // None — uses the framework WebView + android.app.Activity only.
+}

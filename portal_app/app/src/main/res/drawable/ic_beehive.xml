@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon: golden honeycomb hexagon with two dark stripes on a dark tile.
+     Vector only (no PNGs needed); renders on API 24+. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#2A1D05"
+        android:pathData="M0,0 H108 V108 H0 Z" />
+    <path
+        android:fillColor="#FFCE3A"
+        android:pathData="M54,22 L82,38 L82,70 L54,86 L26,70 L26,38 Z" />
+    <path
+        android:fillColor="#1A1206"
+        android:pathData="M40,49 H68 V55 H40 Z" />
+    <path
+        android:fillColor="#1A1206"
+        android:pathData="M40,59 H68 V65 H40 Z" />
+</vector>
