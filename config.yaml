@@ -63,9 +63,9 @@ vision:
   # set host to "https://api.llama.com/compat/v1/", model to
   # "Llama-4-Scout-17B-16E-Instruct-FP8", and set LLAMA_API_KEY env var.
   # Cloud API has rate limits (~3 QPS) — use --level 1 or small batches if you hit 429.
-  backend: "ollama"
-  host: "http://127.0.0.1:11434"
-  model: "llama3.2-vision"
+  backend: "llama_api"
+  host: "https://api.llama.com/compat/v1/"
+  model: "Llama-4-Scout-17B-16E-Instruct-FP8"
   api_key: ""
 
   # Max clips to analyze per run (0 = no limit).
