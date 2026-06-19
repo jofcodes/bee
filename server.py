@@ -92,38 +92,9 @@ def _run_refresh():
         log.info("Vision analysis output: %s", result.stdout[-200:] if result.stdout else "(empty)")
 
         # Step 3: Regenerate activity dashboard
-        log.info("Step 3/3: Regenerating activity dashboard...")
-        # Re-rank clips by activity
-        result = subprocess.run(
-            [python, "-c", """
-import json
-from pathlib import Path
-from beehive_monitor.config import load_config
-from beehive_monitor.level1 import analyze_clip
-
-cfg = load_config(Path('config.yaml'))
-clips = sorted(Path('clips').glob('*.mp4'))
-results = []
-for clip in clips:
-    a = analyze_clip(clip, cfg)
-    results.append({
-        'clip': clip.name,
-        'tracks': len(a.tracks),
-        'blob_count_max': max(a.per_frame_blob_counts) if a.per_frame_blob_counts else 0,
-        'frame_count': a.frame_count,
-    })
-results.sort(key=lambda r: r['tracks'], reverse=True)
-top_n = max(1, len(results) * 5 // 100)
-with open('results/top_activity.json', 'w') as f:
-    json.dump({'top_clips': results[:top_n], 'total_analyzed': len(results), 'percentile': 5}, f, indent=2)
-print(f'Ranked {len(results)} clips, top {top_n} saved')
-"""],
-            cwd=str(PROJECT_DIR),
-            capture_output=True, text=True, timeout=600,
-        )
-        log.info("Activity ranking: %s", result.stdout.strip())
-
-        # Generate the dashboard HTML
+        # Skip the full activity re-ranking (takes ~15 min for 1746 clips).
+        # Just regenerate the dashboard HTML from existing top_activity.json.
+        log.info("Step 3/3: Regenerating dashboard...")
         result = subprocess.run(
             [python, str(PROJECT_DIR / "portal_activity.py"), str(RESULTS_DIR)],
             cwd=str(PROJECT_DIR),
