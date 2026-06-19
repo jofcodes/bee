@@ -196,12 +196,18 @@ let ai = 0;
 function startAmbient() {{
   ai = 0;
   document.getElementById('ambient').classList.add('active');
+  // Request fullscreen on the ambient overlay
+  const el = document.getElementById('ambient');
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
   playAmb(0);
 }}
 function stopAmbient() {{
   document.getElementById('ambient').classList.remove('active');
   const p = document.getElementById('ambientPlayer');
   p.pause(); p.src = '';
+  if (document.exitFullscreen) document.exitFullscreen();
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
 }}
 function playAmb(i) {{
   if (!ambList.length) return;
