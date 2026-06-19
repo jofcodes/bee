@@ -104,7 +104,21 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
     position: sticky; top: 0; z-index: 10;
   }}
   .header h1 {{ font-size: 1.3em; color: #ffd700; }}
+  .header .right {{ display: flex; align-items: center; gap: 12px; }}
   .header .stats {{ font-size: 0.85em; opacity: 0.6; }}
+  .refresh-btn {{
+    background: #ffd700; color: #2d1f00; border: none;
+    padding: 6px 14px; border-radius: 6px; font-weight: 700;
+    font-size: 0.85em; cursor: pointer;
+  }}
+  .refresh-btn:active {{ opacity: 0.7; }}
+  .refresh-btn.spinning {{ animation: spin 1s linear infinite; opacity: 0.6; pointer-events: none; }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  .status-bar {{
+    background: #222; padding: 8px 20px; font-size: 0.8em; color: #888;
+    display: none; border-bottom: 1px solid #333;
+  }}
+  .status-bar.visible {{ display: block; }}
   .grid {{
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -157,8 +171,12 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
 
 <div class="header">
   <h1>&#x1f41d; Most Active Clips</h1>
-  <div class="stats">Top 5% of {total} clips</div>
+  <div class="right">
+    <div class="stats">Top 5% of {total} clips</div>
+    <button class="refresh-btn" id="refreshBtn" onclick="triggerRefresh()">&#x21bb; Refresh</button>
+  </div>
 </div>
+<div class="status-bar" id="statusBar"></div>
 
 <div class="grid" id="grid"></div>
 
@@ -212,6 +230,54 @@ function closeVideo() {{
 document.addEventListener('keydown', e => {{
   if (e.key === 'Escape') closeVideo();
 }});
+
+// Refresh functionality
+const SERVER = window.location.origin;
+function triggerRefresh() {{
+  const btn = document.getElementById('refreshBtn');
+  const bar = document.getElementById('statusBar');
+  btn.classList.add('spinning');
+  btn.textContent = '⟳ Refreshing...';
+  bar.classList.add('visible');
+  bar.textContent = 'Downloading new clips and running analysis...';
+
+  fetch(SERVER + '/refresh', {{method: 'POST'}})
+    .then(r => r.json())
+    .then(d => {{
+      bar.textContent = 'Refresh started — this may take a few minutes...';
+      pollStatus();
+    }})
+    .catch(e => {{
+      bar.textContent = 'Could not reach server. Make sure server.py is running on your laptop.';
+      btn.classList.remove('spinning');
+      btn.textContent = '↻ Refresh';
+    }});
+}}
+
+function pollStatus() {{
+  const btn = document.getElementById('refreshBtn');
+  const bar = document.getElementById('statusBar');
+  fetch(SERVER + '/status')
+    .then(r => r.json())
+    .then(d => {{
+      if (d.running) {{
+        bar.textContent = `Analyzing... ${{d.clips_analyzed}} clips processed, ${{d.events_flagged}} flagged`;
+        setTimeout(pollStatus, 5000);
+      }} else {{
+        btn.classList.remove('spinning');
+        btn.textContent = '↻ Refresh';
+        if (d.last_result === 'success') {{
+          bar.textContent = `Last refresh: ${{d.last_refresh}} — ${{d.clips_analyzed}} clips, ${{d.events_flagged}} flagged. Reloading...`;
+          setTimeout(() => window.location.reload(), 2000);
+        }} else if (d.error) {{
+          bar.textContent = 'Refresh failed: ' + d.error;
+        }}
+      }}
+    }})
+    .catch(() => setTimeout(pollStatus, 5000));
+}}
+
+show(0);
 </script>
 </body></html>"""
 
