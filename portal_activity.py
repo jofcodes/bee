@@ -55,10 +55,16 @@ def _video_to_b64(clip_path: Path) -> str | None:
     return base64.b64encode(data).decode("ascii")
 
 
-def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
+def generate_dashboard(activity_file: Path, clips_dir: Path, digest_file: Path | None = None) -> str:
     data = json.loads(activity_file.read_text())
     top_clips = data["top_clips"]
     total = data["total_analyzed"]
+
+    # Load threat data if available
+    threats = []
+    if digest_file and digest_file.exists():
+        digest = json.loads(digest_file.read_text())
+        threats = digest.get("events", [])
 
     cards = []
     for clip_info in top_clips:
@@ -66,10 +72,8 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
         thumb_b64 = _extract_thumbnail(clip_path) if clip_path.exists() else None
         video_b64 = _video_to_b64(clip_path) if clip_path.exists() else None
 
-        # Extract timestamp from filename
         name = clip_info["clip"]
         ts = name.replace("florida-bees-", "").replace("-00-00.mp4", "").replace("t", " ").replace("-", ":")
-        # Fix: first 3 colons are date separators
         parts = ts.split(" ")
         if len(parts) >= 2:
             date_part = parts[0].replace(":", "-", 2)
@@ -84,7 +88,27 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
             "video": video_b64 or "",
         })
 
+    # Build threat cards
+    threat_cards = []
+    for t in threats:
+        clip_path = clips_dir / t.get("clip", "")
+        thumb_b64 = _extract_thumbnail(clip_path) if clip_path.exists() else None
+        video_b64 = _video_to_b64(clip_path) if clip_path.exists() else None
+        ts = t.get("timestamp", "")[:19]
+        threat_cards.append({
+            "clip": t.get("clip", ""),
+            "timestamp": ts,
+            "description": t.get("description", ""),
+            "animals": t.get("animals_seen", []),
+            "threat_level": t.get("threat_level", "none"),
+            "confidence": t.get("confidence", "unknown"),
+            "thumb": thumb_b64 or "",
+            "video": video_b64 or "",
+        })
+
     cards_json = json.dumps(cards)
+    threats_json = json.dumps(threat_cards)
+    num_threats = len(threat_cards)
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -119,6 +143,22 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
     display: none; border-bottom: 1px solid #333;
   }}
   .status-bar.visible {{ display: block; }}
+  .tabs {{
+    display: flex; background: #1a1a1a; border-bottom: 1px solid #333;
+  }}
+  .tab {{
+    flex: 1; padding: 10px; text-align: center; cursor: pointer;
+    font-size: 0.95em; color: #888; border-bottom: 3px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }}
+  .tab.active {{ color: #ffd700; border-bottom-color: #ffd700; }}
+  .tab .count {{
+    display: inline-block; background: #d32f2f; color: #fff;
+    border-radius: 10px; padding: 1px 7px; font-size: 0.75em;
+    margin-left: 4px; vertical-align: middle;
+  }}
+  .tab-content {{ display: none; }}
+  .tab-content.active {{ display: block; }}
   .grid {{
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -178,7 +218,18 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
 </div>
 <div class="status-bar" id="statusBar"></div>
 
-<div class="grid" id="grid"></div>
+<div class="tabs">
+  <div class="tab active" id="tabActivity" onclick="switchTab('activity')">&#x1f41d; Activity</div>
+  <div class="tab" id="tabThreats" onclick="switchTab('threats')">&#x26a0;&#xfe0f; Threats{f' <span class="count">{num_threats}</span>' if num_threats > 0 else ''}</div>
+</div>
+
+<div class="tab-content active" id="contentActivity">
+  <div class="grid" id="grid"></div>
+</div>
+
+<div class="tab-content" id="contentThreats">
+  <div class="grid" id="threatGrid"></div>
+</div>
 
 <div class="overlay" id="overlay">
   <div class="close" onclick="closeVideo()">&#x2715;</div>
@@ -188,6 +239,14 @@ def generate_dashboard(activity_file: Path, clips_dir: Path) -> str:
 
 <script>
 const cards = {cards_json};
+const threatCards = {threats_json};
+
+function switchTab(tab) {{
+  document.getElementById('tabActivity').classList.toggle('active', tab === 'activity');
+  document.getElementById('tabThreats').classList.toggle('active', tab === 'threats');
+  document.getElementById('contentActivity').classList.toggle('active', tab === 'activity');
+  document.getElementById('contentThreats').classList.toggle('active', tab === 'threats');
+}}
 
 const grid = document.getElementById('grid');
 cards.forEach((c, i) => {{
@@ -204,6 +263,40 @@ cards.forEach((c, i) => {{
       </div>
     </div>`;
 }});
+
+// Render threat cards
+const threatGrid = document.getElementById('threatGrid');
+if (threatCards.length === 0) {{
+  threatGrid.innerHTML = '<div style="padding:40px;text-align:center;color:#666;font-size:1.2em;grid-column:1/-1">&#x2705; No threats detected — all clips show normal honeybee activity</div>';
+}} else {{
+  threatCards.forEach((c, i) => {{
+    const animals = (c.animals || []).map(a => '<span class="metric hot">' + a + '</span>').join('');
+    threatGrid.innerHTML += `
+      <div class="card" onclick="playThreatVideo(${{i}})">
+        <img src="data:image/jpeg;base64,${{c.thumb}}" alt="${{c.clip}}">
+        <div class="info">
+          <div class="time">${{c.timestamp}}</div>
+          <div style="margin:4px 0;font-size:0.9em">${{c.description || ''}}</div>
+          <div class="metrics">
+            ${{animals}}
+            ${{c.threat_level && c.threat_level !== 'none' ? '<span class="metric warm">' + c.threat_level + '</span>' : ''}}
+          </div>
+        </div>
+      </div>`;
+  }});
+}}
+
+function playThreatVideo(i) {{
+  const c = threatCards[i];
+  const player = document.getElementById('player');
+  player.src = 'data:video/mp4;base64,' + c.video;
+  document.getElementById('caption').textContent =
+    c.timestamp + ' — ' + (c.description || 'Threat detected');
+  document.getElementById('overlay').classList.add('active');
+  player.play();
+  if (player.requestFullscreen) player.requestFullscreen();
+  else if (player.webkitRequestFullscreen) player.webkitRequestFullscreen();
+}}
 
 function playVideo(i) {{
   const c = cards[i];
@@ -294,7 +387,8 @@ def main():
         sys.exit(1)
 
     clips_dir = args.results_dir.parent / "clips"
-    html = generate_dashboard(activity_file, clips_dir)
+    digest_file = args.results_dir / "digest.json"
+    html = generate_dashboard(activity_file, clips_dir, digest_file)
 
     out = args.results_dir / "activity_dashboard.html"
     out.write_text(html)

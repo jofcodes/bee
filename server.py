@@ -67,16 +67,19 @@ def _run_refresh():
         log.info("Step 1/3: Downloading new clips from Blink...")
         token_file = PROJECT_DIR / ".blink_token.json"
         if token_file.exists():
-            result = subprocess.run(
-                [python, str(PROJECT_DIR / "download_blink.py"),
-                 "-o", str(CLIPS_DIR), "--days", "1"],
-                cwd=str(PROJECT_DIR),
-                capture_output=True, text=True, timeout=300,
-            )
-            if result.returncode != 0:
-                log.warning("Blink download failed (may need 2FA): %s", result.stderr[:200])
+            try:
+                result = subprocess.run(
+                    [python, str(PROJECT_DIR / "download_blink.py"),
+                     "-o", str(CLIPS_DIR), "--days", "1"],
+                    cwd=str(PROJECT_DIR),
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    log.warning("Blink download failed (may need 2FA) — analyzing existing clips only")
+            except subprocess.TimeoutExpired:
+                log.warning("Blink download timed out (likely needs 2FA) — analyzing existing clips only")
         else:
-            log.info("No Blink token found — skipping download. Analyzing existing clips.")
+            log.info("No Blink token found — analyzing existing clips only.")
 
         # Step 2: Run vision analysis on new clips
         log.info("Step 2/3: Running vision analysis on new clips...")
