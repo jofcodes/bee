@@ -143,38 +143,67 @@ async def download_clips(
     needs_2fa = getattr(blink, "key_required", False) or blink.urls is None
     if needs_2fa and not start_ok:
         log.info("2FA required — Blink should have sent a PIN to your email/phone.")
-        pin = input("  Enter 2FA PIN: ").strip()
-        try:
-            result = await auth.complete_2fa_login(pin)
-            log.info("2FA result: %s", result)
-            if result:
-                # Re-run start() now that auth is complete — this time it
-                # won't need 2FA and will set up blink.urls, cameras, etc.
-                log.info("2FA succeeded — completing Blink setup…")
-                await blink.start()
-            else:
-                log.error("2FA returned False — PIN may have expired.")
-                sys.exit(1)
-        except Exception as exc:
-            log.error("2FA verification failed: %s", exc)
-            log.error(
-                "This may be the HTTP 202/412 bug (#1233). "
-                "Try updating blinkpy or use USB pull."
-            )
-            sys.exit(1)
+        log.info("If you didn't receive a code, type 'retry' to request a new one, or 'skip' to abort.")
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            pin = input(f"  Enter 2FA PIN (attempt {attempt}/{max_attempts}, or 'retry'/'skip'): ").strip().lower()
+
+            if pin == "skip":
+                log.info("Skipping Blink download — no clips will be downloaded this time.")
+                return 0
+
+            if pin == "retry":
+                log.info("Requesting new 2FA code...")
+                try:
+                    # Re-trigger login to send a fresh 2FA code
+                    blink2 = Blink()
+                    auth2 = Auth({"username": email, "password": password})
+                    blink2.auth = auth2
+                    try:
+                        await blink2.start()
+                    except Exception:
+                        pass
+                    # Replace the main blink/auth objects
+                    blink.__dict__.update(blink2.__dict__)
+                    auth.__dict__.update(auth2.__dict__)
+                    log.info("New code requested — check your phone/email.")
+                except Exception as exc:
+                    log.warning("Retry failed: %s", exc)
+                continue
+
+            # Try the PIN
+            try:
+                result = await auth.complete_2fa_login(pin)
+                log.info("2FA result: %s", result)
+                if result:
+                    log.info("2FA succeeded — completing Blink setup…")
+                    await blink.start()
+                    break
+                else:
+                    log.warning("PIN rejected — try again or type 'retry' for a new code.")
+            except Exception as exc:
+                log.warning("2FA error: %s — try again or type 'retry'.", exc)
+        else:
+            log.error("All 2FA attempts failed. Try again later or use USB pull.")
+            return 0
 
     # Verify auth completed
     if blink.urls is None:
         log.error(
-            "Authentication did not complete — blink.urls is still None.\n"
-            "This is a known blinkpy issue. Fallback: pull clips via USB."
+            "Authentication did not complete.\n"
+            "Options:\n"
+            "  1. Try again — sometimes the SMS arrives late\n"
+            "  2. Pull clips from your Sync Module USB drive instead"
         )
-        sys.exit(1)
+        return 0
 
-    # Save session token to avoid 2FA next time
+    # Save session token to avoid 2FA next time.
+    # This token typically lasts several days — keep it fresh by
+    # running downloads regularly so it doesn't expire.
     if auth.token:
         CREDS_FILE.write_text(json.dumps(auth.token))
-        log.info("Saved session token to %s (delete to force re-auth)", CREDS_FILE)
+        log.info("Session saved — next download should skip 2FA if token is still valid")
 
     # List cameras
     await blink.refresh()
@@ -242,9 +271,25 @@ def main() -> None:
 
     email = args.email
     if not email:
-        print("Enter your Blink credentials (password will be hidden):")
-        email = input("  Email: ").strip()
+        # Try loading saved credentials
+        creds_path = Path(".blink_creds")
+        if creds_path.exists():
+            saved = json.loads(creds_path.read_text())
+            email = saved.get("email", "")
+            if email:
+                print(f"Using saved email: {email}")
+                use_saved = input("  Press Enter to continue, or type a new email: ").strip()
+                if use_saved:
+                    email = use_saved
+
+        if not email:
+            print("Enter your Blink credentials (password will be hidden):")
+            email = input("  Email: ").strip()
+
     password = getpass.getpass("  Password: ")
+
+    # Save email for next time (not password)
+    Path(".blink_creds").write_text(json.dumps({"email": email}))
 
     count = asyncio.run(download_clips(email, password, args.output, args.days, args.hours))
 

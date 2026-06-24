@@ -28,3 +28,4 @@ portal_app/local.properties
 # logs from auto refresh
 logs/
 
+.blink_creds
